@@ -1,0 +1,821 @@
+/* ===========================================================================
+   BookOS Shell — estilos. Paleta extraída de los esquemas de color BookOS
+   (estilo macOS/Apple). El cambio de tema es reactivo: alternar [data-theme]
+   en <html> reescribe todas las variables y todo transiciona suavemente.
+   =========================================================================== */
+
+:root {
+  --radius: 12px;
+  --radius-sm: 8px;
+  --font-ui: "SF Pro Display", "SN Pro", "Inter", system-ui, sans-serif;
+  --transition: 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  touch-action: pan-x pan-y;
+  --titlebar-h: 30px;
+}
+
+/* ---- Tema CLARO (BookOS Light) ---- */
+html[data-theme="light"] {
+  /* Hace que los controles NATIVOS (select abierto, spinners, scrollbars)
+     se pinten en claro en vez del tema GTK del sistema. */
+  color-scheme: light;
+  --accent: #007aff;
+  --accent-hover: #0a84ff;
+  --bg-window: #f2f2f7;
+  --bg-elevated: #ffffff;
+  --bg-alt: #e5e5ea;
+  --bg-term: #ffffff;
+  --bg-glass: rgba(242, 242, 247, 0.72);
+  --fg: #000000;
+  --fg-dim: #8e8e93;
+  --border: rgba(0, 0, 0, 0.1);
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  --positive: #34c759;
+  --neutral: #ffcc00;
+  --negative: #ff3b30;
+  --selection: rgba(0, 122, 255, 0.25);
+}
+
+/* ---- Tema OSCURO (BookOS Dark) ---- */
+html[data-theme="dark"] {
+  /* Idem en oscuro: el desplegable nativo y los spinners salen oscuros. */
+  color-scheme: dark;
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --bg-window: #000000;
+  --bg-elevated: #1c1c1e;
+  --bg-alt: #0d0d0f;
+  --bg-term: #000000;
+  --bg-glass: rgba(28, 28, 30, 0.62);
+  --fg: #ffffff;
+  --fg-dim: #8e8e93;
+  --border: rgba(255, 255, 255, 0.1);
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  --positive: #30d158;
+  --neutral: #ffd60a;
+  --negative: #ff453a;
+  --selection: rgba(10, 132, 255, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Bloquea el gesto de pellizco-zoom del touchpad en todo el documento. */
+html {
+  touch-action: pan-x pan-y;
+  -ms-touch-action: pan-x pan-y;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  overscroll-behavior: none;
+  color: var(--fg);
+  /* Fondo sólido del tema. El blur del escritorio NO se aplica por defecto;
+     es opcional vía regla de KWin (ver packaging/kwin-blur.md). */
+  background: var(--bg-window);
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* ===================== Barra de título ===================== */
+.titlebar {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+/* Pestañas en el centro (estilo notepad): se estiran y hacen scroll. */
+.tb-center {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding-top: 8px;
+}
+.tb-center::-webkit-scrollbar {
+  display: none;
+}
+
+/* Controles de ventana a la derecha. */
+.tb-right {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+.controls {
+  display: flex;
+  gap: 1px;
+  margin-left: 4px;
+}
+.controls button {
+  background: none;
+  border: 0;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.6;
+  width: 28px;
+  height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.controls button:hover {
+  opacity: 1;
+  background: var(--bg-alt);
+}
+#winClose:hover {
+  background: var(--negative);
+  color: #fff;
+  opacity: 1;
+}
+
+/* ===================== Menú ===================== */
+.menubar {
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.menu {
+  position: relative;
+}
+.menu-trigger {
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.menu-trigger:hover,
+.menu.open .menu-trigger {
+  background: var(--bg-alt);
+}
+
+.menu-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 6px;
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 100;
+  animation: pop 0.14s ease;
+}
+.menu.open .menu-popup {
+  display: flex;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.menu-popup button,
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.menu-popup button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.menu-popup button:hover kbd {
+  color: rgba(255, 255, 255, 0.85);
+}
+.menu-popup hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 2px;
+}
+kbd {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.menu-row select,
+.menu-row input {
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* ===================== Pestañas (estilo notepad) ===================== */
+/* Con una sola pestaña, la ocultamos: el área de título queda limpia. */
+.tb-center.single-tab .tab {
+  display: none;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-alt);
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 8px 6px 12px;
+  border-radius: 9px 9px 0 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  max-width: 180px;
+  min-width: 110px;
+  height: 30px;
+  opacity: 0.7;
+  transition: background 0.18s, opacity 0.18s, color 0.18s;
+  position: relative;
+}
+.tab:hover {
+  opacity: 1;
+  background: var(--bg-elevated);
+}
+.tab.active {
+  background: var(--bg-elevated);
+  opacity: 1;
+  color: var(--fg);
+  box-shadow: 0 -2px 0 var(--accent) inset;
+}
+.tab .tab-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.tab .tab-close {
+  background: 0;
+  border: 0;
+  color: var(--fg-dim);
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+.tab.active .tab-close,
+.tab:hover .tab-close {
+  opacity: 0.6;
+}
+.tab .tab-close:hover {
+  opacity: 1 !important;
+  background: var(--bg-alt);
+  color: var(--negative);
+}
+.tab-add {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 18px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  align-self: center;
+  -webkit-app-region: no-drag;
+}
+.tab-add:hover {
+  background: var(--bg-alt);
+  color: var(--fg);
+}
+
+/* ===================== Cuerpo ===================== */
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  padding: 0 10px 10px;
+  gap: 10px;
+}
+.panes {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+/* Cada vista de terminal (pestaña activa). Las divisiones se hacen con flex. */
+.pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-term);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+  transition: background var(--transition), border-color var(--transition);
+}
+.pane.split-v {
+  flex-direction: column;
+}
+.pane.focused {
+  border-color: var(--accent);
+}
+.pane .xterm {
+  padding: 8px;
+  height: 100%;
+}
+.tabview {
+  flex: 1;
+  display: none;
+  gap: 8px;
+  min-width: 0;
+}
+.tabview.active {
+  display: flex;
+}
+.tabview.split-vertical {
+  flex-direction: column;
+}
+
+/* ===================== Panel de sistema ===================== */
+.syspanel {
+  width: 300px;
+  flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: background var(--transition), border-color var(--transition),
+    margin var(--transition), opacity var(--transition);
+}
+.syspanel.hidden {
+  margin-right: -310px;
+  opacity: 0;
+  pointer-events: none;
+}
+/* Dos mitades verticales: widgets arriba (crece), atajos abajo. */
+.syspanel-section {
+  padding: 10px 12px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.syspanel-section.grow {
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+.shortcut-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.shortcut-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+.shortcut-list kbd {
+  font-size: 10.5px;
+  color: var(--fg);
+  background: var(--bg-alt);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.syspanel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.syspanel h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+.syspanel-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.syspanel-close:hover {
+  background: var(--bg-alt);
+  color: var(--fg);
+}
+/* --- Rejilla de widgets: 2 columnas, los widgets van uno junto a otro --- */
+.widgets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-content: start;
+}
+/* Un widget puede ocupar las 2 columnas (p.ej. red con IP larga). */
+.widget.wide {
+  grid-column: 1 / -1;
+}
+.widget {
+  position: relative;
+  background: var(--bg-alt);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  transition: border-color 0.15s, background 0.15s, transform 0.12s;
+}
+.widget.actionable {
+  cursor: pointer;
+}
+.widget.actionable:hover {
+  border-color: var(--accent);
+}
+.widget.dragging {
+  opacity: 0.5;
+}
+.widget.drop-target {
+  border-color: var(--accent);
+}
+.widget-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.widget-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.widget-tools {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.widget:hover .widget-tools {
+  opacity: 1;
+}
+.widget-tool {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: 4px;
+}
+.widget-tool:hover {
+  color: var(--fg);
+  background: var(--bg-elevated);
+}
+.widget-tool.drag {
+  cursor: grab;
+}
+.widget-body {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.widget-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.widget.small .widget-value {
+  font-size: 13px;
+}
+.widget-sub {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  word-break: break-word;
+}
+.widget-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-window);
+  overflow: hidden;
+  margin-top: 7px;
+}
+.widget.small .widget-bar {
+  display: none; /* el tamaño pequeño oculta la barra */
+}
+.widget-bar > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.5s ease, background 0.3s ease;
+}
+.widget.warn .widget-bar > i { background: var(--neutral); }
+.widget.crit .widget-bar > i { background: var(--negative); }
+.widget.ok .widget-bar > i { background: var(--positive); }
+
+.syspanel-actions {
+  display: flex;
+  gap: 2px;
+}
+.syspanel-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.syspanel-btn:hover {
+  background: var(--bg-alt);
+  color: var(--fg);
+}
+
+/* --- Selector de widgets --- */
+.modal-narrow {
+  width: 380px;
+}
+.picker-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 16px;
+}
+.picker-item {
+  padding: 14px 10px;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--fg);
+  transition: border-color 0.15s, background 0.15s;
+}
+.picker-item:hover {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+.modal-body.single {
+  display: block;
+  padding: 18px;
+}
+.wcfg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  font-size: 13px;
+}
+.wcfg-row + .wcfg-row {
+  border-top: 1px solid var(--border);
+}
+.seg {
+  display: flex;
+  gap: 4px;
+}
+.seg button {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.seg button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ===================== Modal de perfiles ===================== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+}
+.modal-backdrop[hidden] {
+  display: none;
+}
+.modal {
+  width: 520px;
+  max-width: 90vw;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h3 {
+  font-size: 15px;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 16px;
+  cursor: pointer;
+}
+.modal-body {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 18px;
+}
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* Estado vacío: ocupa la columna para que el modal no quede a medias. */
+.profile-empty {
+  margin: auto 0;
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.profile-item {
+  padding: 9px 11px;
+  background: var(--bg-alt);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.profile-item small {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+}
+.profile-item .del {
+  color: var(--negative);
+  opacity: 0.6;
+}
+.profile-item .del:hover {
+  opacity: 1;
+}
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.profile-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.profile-form input,
+.profile-form select {
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.btn {
+  flex: 1;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-alt);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.btn:hover {
+  filter: brightness(1.08);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* Selects: quitamos el widget nativo (WebKitGTK lo pintaba blanco, ignorando
+   el tema) y ponemos una flecha SVG propia para que usen la paleta de la app. */
+.profile-form select,
+.menu-row select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--bg-alt);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238e8e93' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 11px;
+  padding-right: 28px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fg-dim);
+  opacity: 0.3;
+  border-radius: 4px;
+}

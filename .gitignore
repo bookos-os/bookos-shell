@@ -1,0 +1,30 @@
+# ---- Node / frontend ----
+node_modules/
+dist/
+.vite/
+*.local
+
+# ---- Rust / Tauri ----
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+
+# ---- Logs y temporales ----
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Editores / SO ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---- Entorno ----
+.env
+.env.*
+!.env.example

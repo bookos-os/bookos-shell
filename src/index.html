@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>BookOS Shell</title>
+    <!-- Anti-flashbang: fija el tema ANTES de que el CSS pinte nada, usando el
+         último tema resuelto que guardamos en disco. Así la ventana nunca abre
+         en claro para saltar a oscuro un instante después. -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem("bookos.themeMode") || "auto";
+          var theme;
+          if (mode === "light" || mode === "dark") {
+            theme = mode;
+          } else {
+            // "auto": usa el último tema real conocido; si no hay, el del SO.
+            theme = localStorage.getItem("bookos.theme");
+            if (!theme && window.matchMedia) {
+              theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            }
+            theme = theme || "dark";
+          }
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="./css/app.css" />
+  </head>
+  <body>
+    <!-- ===== Barra de título (arrastrable, estilo BookOS) ===== -->
+    <header class="titlebar" data-tauri-drag-region>
+      <nav class="menubar" data-tauri-drag-region>
+        <div class="menu" data-menu="file">
+          <button class="menu-trigger" data-i18n="menu.file">Archivo</button>
+          <div class="menu-popup" role="menu">
+            <button data-action="new-tab"><span data-i18n="action.newTab">Nueva pestaña</span><kbd>Ctrl+T</kbd></button>
+            <button data-action="new-window"><span data-i18n="action.newWindow">Nueva ventana</span><kbd>Ctrl+N</kbd></button>
+            <hr />
+            <button data-action="split-h"><span data-i18n="action.splitH">Dividir horizontal</span><kbd>Ctrl+Shift+D</kbd></button>
+            <button data-action="split-v"><span data-i18n="action.splitV">Dividir vertical</span><kbd>Ctrl+Shift+E</kbd></button>
+            <hr />
+            <button data-action="close-tab"><span data-i18n="action.closeTab">Cerrar pestaña</span><kbd>Ctrl+W</kbd></button>
+          </div>
+        </div>
+
+        <div class="menu" data-menu="edit">
+          <button class="menu-trigger" data-i18n="menu.edit">Editar</button>
+          <div class="menu-popup" role="menu">
+            <button data-action="copy"><span data-i18n="action.copy">Copiar</span><kbd>Ctrl+Shift+C</kbd></button>
+            <button data-action="paste"><span data-i18n="action.paste">Pegar</span><kbd>Ctrl+Shift+V</kbd></button>
+            <button data-action="clear"><span data-i18n="action.clear">Limpiar</span></button>
+          </div>
+        </div>
+
+        <div class="menu" data-menu="view">
+          <button class="menu-trigger" data-i18n="menu.view">Ver</button>
+          <div class="menu-popup" role="menu">
+            <button data-action="zoom-in"><span data-i18n="action.zoomIn">Ampliar texto</span><kbd>Ctrl++</kbd></button>
+            <button data-action="zoom-out"><span data-i18n="action.zoomOut">Reducir texto</span><kbd>Ctrl+-</kbd></button>
+            <button data-action="zoom-reset"><span data-i18n="action.zoomReset">Tamaño normal</span><kbd>Ctrl+0</kbd></button>
+            <hr />
+            <button data-action="toggle-stats"><span data-i18n="action.toggleStats">Panel de sistema</span></button>
+          </div>
+        </div>
+
+        <div class="menu" data-menu="profiles">
+          <button class="menu-trigger" data-i18n="menu.profiles">Perfiles</button>
+          <div class="menu-popup" role="menu" id="profilesMenu">
+            <!-- Perfiles inyectados por JS -->
+            <hr />
+            <button data-action="manage-profiles"><span data-i18n="action.manageProfiles">Gestionar perfiles…</span></button>
+          </div>
+        </div>
+
+        <div class="menu" data-menu="settings">
+          <button class="menu-trigger" data-i18n="menu.settings">Ajustes</button>
+          <div class="menu-popup" role="menu">
+            <label class="menu-row">
+              <span data-i18n="settings.language">Idioma</span>
+              <select id="langSelect">
+                <option value="es">Español</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label class="menu-row">
+              <span data-i18n="settings.themeMode">Tema</span>
+              <select id="themeSelect">
+                <option value="auto" data-i18n="settings.themeAuto">Automático</option>
+                <option value="light" data-i18n="settings.themeLight">Claro</option>
+                <option value="dark" data-i18n="settings.themeDark">Oscuro</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Pestañas en el centro; el + aparece pegado a ellas. -->
+      <div class="tb-center" id="tabs" data-tauri-drag-region></div>
+
+      <!-- Controles de ventana. Los iconos que duplicaban menús (nueva pestaña,
+           dividir, nueva ventana, panel, perfiles, tema) se quitaron: cada acción
+           sigue en sus menús (Archivo, Ver, Perfiles, Ajustes). -->
+      <div class="tb-right">
+        <div class="controls">
+          <button data-win="min" data-i18n-title="wm.minimize" title="Minimizar">─</button>
+          <button data-win="max" data-i18n-title="wm.maximize" title="Maximizar">☐</button>
+          <button id="winClose" data-win="close" data-i18n-title="wm.close" title="Cerrar">✕</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== Cuerpo: terminales + panel de sistema ===== -->
+    <main class="body">
+      <div class="panes" id="panes"></div>
+
+      <aside class="syspanel" id="syspanel">
+        <!-- Mitad superior: widgets (rejilla de 2 columnas) -->
+        <div class="syspanel-section grow">
+          <div class="syspanel-head">
+            <h2 data-i18n="sys.title">Sistema</h2>
+            <div class="syspanel-actions">
+              <button class="syspanel-btn" data-action="add-widget" data-i18n-title="widget.add" title="Añadir widget">+</button>
+              <button class="syspanel-btn" data-action="toggle-stats" data-i18n-title="widget.hide" title="Ocultar">✕</button>
+            </div>
+          </div>
+          <div class="widgets" id="widgets"></div>
+        </div>
+
+        <!-- Mitad inferior: atajos de teclado -->
+        <div class="syspanel-section">
+          <div class="syspanel-head">
+            <h2 data-i18n="side.title">Atajos</h2>
+          </div>
+          <ul class="shortcut-list">
+            <li><span data-i18n="action.newTab">Nueva pestaña</span><kbd>Ctrl+T</kbd></li>
+            <li><span data-i18n="action.newWindow">Nueva ventana</span><kbd>Ctrl+N</kbd></li>
+            <li><span data-i18n="action.splitH">Dividir horizontal</span><kbd>Ctrl+Shift+D</kbd></li>
+            <li><span data-i18n="action.splitV">Dividir vertical</span><kbd>Ctrl+Shift+E</kbd></li>
+            <li><span data-i18n="action.closeTab">Cerrar pestaña</span><kbd>Ctrl+W</kbd></li>
+            <li><span data-i18n="action.copy">Copiar</span><kbd>Ctrl+Shift+C</kbd></li>
+            <li><span data-i18n="action.paste">Pegar</span><kbd>Ctrl+Shift+V</kbd></li>
+          </ul>
+        </div>
+      </aside>
+    </main>
+
+    <!-- ===== Selector de widgets a añadir ===== -->
+    <div class="modal-backdrop" id="widgetPicker" hidden>
+      <div class="modal modal-narrow">
+        <header class="modal-head">
+          <h3 data-i18n="widget.pickTitle">Añadir widget</h3>
+          <button class="modal-close" data-action="close-picker">✕</button>
+        </header>
+        <div class="picker-grid" id="pickerGrid"></div>
+      </div>
+    </div>
+
+    <!-- ===== Configuración de un widget ===== -->
+    <div class="modal-backdrop" id="widgetConfig" hidden>
+      <div class="modal modal-narrow">
+        <header class="modal-head">
+          <h3 data-i18n="widget.configTitle">Configurar widget</h3>
+          <button class="modal-close" data-action="close-config">✕</button>
+        </header>
+        <div class="modal-body single" id="widgetConfigBody"></div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: gestor de perfiles ===== -->
+    <div class="modal-backdrop" id="profileModal" hidden>
+      <div class="modal">
+        <header class="modal-head">
+          <h3 data-i18n="profile.title">Perfiles</h3>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </header>
+        <div class="modal-body">
+          <div class="profile-list" id="profileList"></div>
+          <form class="profile-form" id="profileForm">
+            <label><span data-i18n="profile.name">Nombre</span>
+              <input type="text" id="pName" required /></label>
+            <label><span data-i18n="profile.font">Tipografía</span>
+              <select id="pFont"></select></label>
+            <label><span data-i18n="profile.fontSize">Tamaño</span>
+              <input type="number" id="pFontSize" min="8" max="40" value="14" /></label>
+            <label><span data-i18n="profile.shell">Shell</span>
+              <input type="text" id="pShell" placeholder="/usr/bin/fish" /></label>
+            <label><span data-i18n="profile.activateOn">Activar al cambiar a</span>
+              <select id="pActivateOn">
+                <option value="none" data-i18n="profile.activateNone">Nunca (manual)</option>
+                <option value="light" data-i18n="profile.activateLight">Modo claro</option>
+                <option value="dark" data-i18n="profile.activateDark">Modo oscuro</option>
+              </select></label>
+            <div class="modal-actions">
+              <button type="submit" class="btn primary" data-i18n="profile.save">Guardar</button>
+              <button type="button" class="btn" data-action="reset-form" data-i18n="profile.newProfile">Nuevo</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>

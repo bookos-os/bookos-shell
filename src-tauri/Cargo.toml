@@ -1,0 +1,45 @@
+[package]
+name = "bookos-shell"
+version = "0.6.0"
+description = "Terminal nativa para BookOS"
+authors = ["evelyn"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "bookos_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# PTY nativo de Linux
+portable-pty = "0.8"
+# Stats del sistema (CPU, mem, swap, disco, red...)
+sysinfo = "0.33"
+# D-Bus para escuchar cambios de tema del escritorio
+zbus = { version = "4", default-features = false, features = ["tokio"] }
+zvariant = "4"
+futures-util = "0.3"
+# Async runtime (compartido con tauri)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+once_cell = "1"
+
+# Linux: acceso directo al WebView WebKitGTK para desactivar el pinch-zoom.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

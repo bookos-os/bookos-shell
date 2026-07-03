@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Bookos Shell",
+  "version": "0.6.0",
+  "identifier": "com.bookos.shell",
+  "build": {
+    "beforeDevCommand": "npm run dev:vite",
+    "devUrl": "http://localhost:5181",
+    "beforeBuildCommand": "npm run build:vite",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "BookOS Shell",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 560,
+        "minHeight": 360,
+        "decorations": false,
+        "transparent": true,
+        "resizable": true,
+        "center": true,
+        "visible": false,
+        "zoomHotkeysEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm"],
+    "icon": ["icons/icon.png"],
+    "category": "Utility",
+    "shortDescription": "Terminal nativa para BookOS",
+    "linux": {
+      "deb": {
+        "depends": [],
+        "postInstallScript": "scripts/postinstall.sh"
+      },
+      "rpm": {
+        "postInstallScript": "scripts/postinstall.sh"
+      }
+    }
+  }
+}
