@@ -774,7 +774,6 @@ async function boot() {
   // equivocado. Ya con el tema aplicado y el primer panel montado, la
   // mostramos en el siguiente frame: el usuario solo ve el tema correcto.
   revealWindow();
-  setTimeout(() => openProfileModal(), 400); // TEMP-SHOT
 }
 
 // Muestra la ventana una sola vez, tras pintar. Doble rAF = el navegador ya

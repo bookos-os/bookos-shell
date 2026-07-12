@@ -43,7 +43,9 @@ export function createTerminal(container, { theme, profile, onTitle } = {}) {
     fontFamily: `${profile?.font || "Hack"}, "SF Mono", monospace`,
     fontSize: profile?.fontSize || 14,
     cursorBlink: true,
-    allowTransparency: true,
+    // Los fondos de las paletas son opacos: con transparencia activada el
+    // WebView (WebKitGTK) paga composición alfa en cada frame para nada.
+    allowTransparency: false,
     scrollback: 10000,
     theme: TERM_THEMES[theme] || TERM_THEMES.dark,
   });

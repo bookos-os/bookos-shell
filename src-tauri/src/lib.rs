@@ -16,27 +16,36 @@ static WINDOW_SEQ: AtomicU32 = AtomicU32::new(1);
 
 // ---------- Comandos PTY ----------
 
+// Los comandos van como `async`: en Tauri 2 los comandos síncronos se
+// ejecutan en el HILO PRINCIPAL, así que un pty_write por tecla o el refresco
+// de stats (disco/red) cada 2 s bloqueaban la UI. Async = pool aparte.
+
 #[tauri::command]
-fn pty_spawn(
+async fn pty_spawn(
     app: AppHandle,
-    mgr: State<pty::PtyManager>,
+    window: tauri::WebviewWindow,
+    mgr: State<'_, pty::PtyManager>,
     id: String,
     cols: u16,
     rows: u16,
     shell: Option<String>,
     cwd: Option<String>,
 ) -> Result<(), String> {
-    mgr.spawn(app, id, cols, rows, shell, cwd)
+    mgr.spawn(app, window.label().to_string(), id, cols, rows, shell, cwd)
 }
 
 #[tauri::command]
-fn pty_write(mgr: State<pty::PtyManager>, id: String, data: String) -> Result<(), String> {
+async fn pty_write(
+    mgr: State<'_, pty::PtyManager>,
+    id: String,
+    data: String,
+) -> Result<(), String> {
     mgr.write(&id, &data)
 }
 
 #[tauri::command]
-fn pty_resize(
-    mgr: State<pty::PtyManager>,
+async fn pty_resize(
+    mgr: State<'_, pty::PtyManager>,
     id: String,
     cols: u16,
     rows: u16,
@@ -45,19 +54,20 @@ fn pty_resize(
 }
 
 #[tauri::command]
-fn pty_kill(mgr: State<pty::PtyManager>, id: String) {
+async fn pty_kill(mgr: State<'_, pty::PtyManager>, id: String) -> Result<(), String> {
     mgr.kill(&id);
+    Ok(())
 }
 
 // ---------- Comandos del sistema ----------
 
 #[tauri::command]
-fn get_stats() -> stats::Stats {
+async fn get_stats() -> stats::Stats {
     stats::collect()
 }
 
 #[tauri::command]
-fn list_fonts() -> Vec<String> {
+async fn list_fonts() -> Vec<String> {
     stats::list_fonts()
 }
 

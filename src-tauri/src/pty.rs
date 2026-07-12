@@ -1,17 +1,24 @@
 //! Puente PTY <-> Frontend.
 //!
 //! Cada terminal (pestaña o panel dividido) tiene su propio PTY con un `id`
-//! único. El flujo de la shell se acumula en un buffer y se vuelca al frontend
-//! cada ~16 ms (60 fps) para no saturar el WebView con miles de eventos.
+//! único. La salida de la shell se emite con latencia adaptativa: si la
+//! terminal estaba en reposo (eco de una tecla, prompt), el primer chunk sale
+//! inmediatamente; solo cuando hay flujo continuo (cat de un fichero grande)
+//! se agrupa en ventanas de ~16 ms (60 fps) para no saturar el WebView.
+//! En reposo no hay ningún wakeup periódico: el hilo emisor duerme bloqueado
+//! en el canal (0% CPU, importante en batería).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+
+/// Ventana de agrupado bajo flujo continuo (60 fps).
+const FRAME: Duration = Duration::from_millis(16);
 
 /// Una sesión PTY activa: el par maestro/esclavo y el writer hacia la shell.
 struct Session {
@@ -32,15 +39,52 @@ struct PtyOutput {
     data: String,
 }
 
+/// Emite lo acumulado en `buf` hacia la ventana dueña del PTY.
+///
+/// Un carácter UTF-8 multibyte partido por el corte del chunk no debe
+/// emitirse como '�': la cola incompleta se queda en `buf` y sale entera en
+/// el siguiente volcado (salvo en el volcado final, donde ya no habrá más).
+fn emit_chunk(app: &AppHandle, target: &str, id: &str, buf: &mut Vec<u8>, final_flush: bool) {
+    if buf.is_empty() {
+        return;
+    }
+    let mut chunk = std::mem::take(buf);
+    if !final_flush {
+        if let Err(e) = std::str::from_utf8(&chunk) {
+            if e.error_len().is_none() {
+                *buf = chunk.split_off(e.valid_up_to());
+            }
+        }
+        if chunk.is_empty() {
+            return;
+        }
+    }
+    let data = String::from_utf8_lossy(&chunk).to_string();
+    let _ = app.emit_to(
+        target,
+        "pty://data",
+        PtyOutput {
+            id: id.to_string(),
+            data,
+        },
+    );
+}
+
 impl PtyManager {
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Abre un nuevo PTY ejecutando la shell de login del usuario.
+    ///
+    /// `target` es la etiqueta de la ventana que pidió el PTY: los eventos
+    /// `pty://data` / `pty://exit` se emiten SOLO a esa ventana, no a todas
+    /// (con varias ventanas abiertas cada WebView deserializaría el tráfico
+    /// de todas las terminales).
     pub fn spawn(
         &self,
         app: AppHandle,
+        target: String,
         id: String,
         cols: u16,
         rows: u16,
@@ -102,70 +146,52 @@ impl PtyManager {
             .unwrap()
             .insert(id.clone(), Session { pair, writer });
 
-        // --- Hilo lector con buffering a 60 fps ---
-        let app_read = app.clone();
-        let read_id = id.clone();
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+        // --- Hilo lector: PTY -> canal ---
+        // Al cerrarse el PTY (EOF o kill()), tx se destruye y el emisor sale.
         std::thread::spawn(move || {
-            let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::with_capacity(8192)));
-            // Flag de cierre explícito: un byte NUL legítimo en la salida no
-            // debe confundirse con el fin del PTY, y el último volcado pendiente
-            // debe emitirse antes de terminar (sin perder las últimas líneas).
-            let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-            // Hilo de volcado: cada 16 ms manda lo acumulado en un solo evento.
-            let flush_buf = buffer.clone();
-            let flush_app = app_read.clone();
-            let flush_id = read_id.clone();
-            let flush_done = done.clone();
-            let flusher = std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_millis(16));
-                let finished = flush_done.load(std::sync::atomic::Ordering::Acquire);
-                let mut chunk = std::mem::take(&mut *flush_buf.lock().unwrap());
-                if !chunk.is_empty() {
-                    // Un carácter UTF-8 multibyte partido por el corte de 16 ms
-                    // no debe emitirse como '�': la cola incompleta vuelve al
-                    // frente del buffer y sale entera en el siguiente volcado.
-                    if !finished {
-                        if let Err(e) = std::str::from_utf8(&chunk) {
-                            if e.error_len().is_none() {
-                                let tail = chunk.split_off(e.valid_up_to());
-                                let mut b = flush_buf.lock().unwrap();
-                                let mut merged = tail;
-                                merged.extend_from_slice(&b);
-                                *b = merged;
-                            }
-                        }
-                    }
-                    if chunk.is_empty() {
-                        continue;
-                    }
-                    let data = String::from_utf8_lossy(&chunk).to_string();
-                    let _ = flush_app.emit(
-                        "pty://data",
-                        PtyOutput {
-                            id: flush_id.clone(),
-                            data,
-                        },
-                    );
-                }
-                if finished {
-                    break;
-                }
-            });
-
             let mut tmp = [0u8; 8192];
             loop {
                 match reader.read(&mut tmp) {
-                    Ok(0) => break,             // EOF: la shell terminó
-                    Ok(n) => buffer.lock().unwrap().extend_from_slice(&tmp[..n]),
+                    Ok(0) => break, // EOF: la shell terminó
+                    Ok(n) => {
+                        if tx.send(tmp[..n].to_vec()).is_err() {
+                            break;
+                        }
+                    }
                     Err(_) => break,
                 }
             }
+        });
 
-            // Señalamos cierre al flusher (vuelca lo pendiente y termina).
-            done.store(true, std::sync::atomic::Ordering::Release);
-            let _ = flusher.join();
-            let _ = app_read.emit("pty://exit", read_id.clone());
+        // --- Hilo emisor: canal -> frontend, con latencia adaptativa ---
+        std::thread::spawn(move || {
+            let mut buf: Vec<u8> = Vec::with_capacity(8192);
+            // Arranca "vencido" para que el primer chunk salga al instante.
+            let mut last_emit = Instant::now() - FRAME;
+            loop {
+                // Reposo: duerme bloqueado hasta que llegue algo (0 wakeups).
+                match rx.recv() {
+                    Ok(chunk) => buf.extend_from_slice(&chunk),
+                    Err(_) => break, // canal cerrado: el PTY terminó
+                }
+                // Si hace >=16 ms del último volcado (eco de tecla tras
+                // reposo), emitimos YA. Si hay flujo continuo, esperamos el
+                // resto de la ventana acumulando lo que siga llegando.
+                let since = last_emit.elapsed();
+                if since < FRAME {
+                    std::thread::sleep(FRAME - since);
+                }
+                while let Ok(chunk) = rx.try_recv() {
+                    buf.extend_from_slice(&chunk);
+                }
+                emit_chunk(&app, &target, &id, &mut buf, false);
+                last_emit = Instant::now();
+            }
+            // Volcado final pendiente (sin perder las últimas líneas) + exit.
+            emit_chunk(&app, &target, &id, &mut buf, true);
+            let _ = app.emit_to(target.as_str(), "pty://exit", id.clone());
             let _ = child.wait();
         });
 

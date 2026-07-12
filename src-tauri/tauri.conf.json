@@ -31,17 +31,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm"],
-    "icon": ["icons/icon.png"],
+    "targets": [
+      "deb",
+      "rpm"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
     "category": "Utility",
     "shortDescription": "Terminal nativa para BookOS",
     "linux": {
       "deb": {
         "depends": [],
-        "postInstallScript": "scripts/postinstall.sh"
+        "postInstallScript": "scripts/postinstall.sh",
+        "desktopTemplate": "linux/desktop.hbs"
       },
       "rpm": {
-        "postInstallScript": "scripts/postinstall.sh"
+        "postInstallScript": "scripts/postinstall.sh",
+        "desktopTemplate": "linux/desktop.hbs"
       }
     }
   }
