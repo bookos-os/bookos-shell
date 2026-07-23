@@ -215,7 +215,7 @@ function renderTabs() {
     el.className = "tab" + (tab.id === state.activeTab ? " active" : "");
     el.innerHTML =
       `<span class="tab-name">${escapeHtml(tab.title)}</span>` +
-      `<button class="tab-close" title="Cerrar pestaña">✕</button>`;
+      `<button class="tab-close" title="Cerrar pestaña"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>`;
     el.onclick = () => selectTab(tab.id);
     el.querySelector(".tab-close").onclick = (e) => {
       e.stopPropagation();
@@ -429,7 +429,7 @@ function renderProfileList() {
     const item = document.createElement("div");
     item.className = "profile-item";
     const when = p.activateOn === "none" ? "" : ` · ${t("profile.activate" + cap(p.activateOn))}`;
-    item.innerHTML = `<span>${escapeHtml(p.name)}<br><small>${escapeHtml(p.font)} ${p.fontSize}px${when}</small></span><span class="del">✕</span>`;
+    item.innerHTML = `<span>${escapeHtml(p.name)}<br><small>${escapeHtml(p.font)} ${p.fontSize}px${when}</small></span><span class="del"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></span>`;
     item.querySelector("span:first-child").onclick = () => loadProfileIntoForm(p);
     item.querySelector(".del").onclick = (e) => {
       e.stopPropagation();
@@ -523,7 +523,7 @@ function renderWidgets() {
         <span class="widget-tools">
           <button class="widget-tool drag" title="Mover" draggable="true">⠿</button>
           ${hasOpts ? `<button class="widget-tool cfg" title="${escapeHtml(t("widget.configure"))}">⚙</button>` : ""}
-          <button class="widget-tool del" title="${escapeHtml(t("widget.remove"))}">✕</button>
+          <button class="widget-tool del" title="${escapeHtml(t("widget.remove"))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
         </span>
       </div>
       <div class="widget-body">
