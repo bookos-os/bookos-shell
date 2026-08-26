@@ -151,6 +151,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            bookos_palette_css,
             pty_spawn,
             pty_write,
             pty_resize,
@@ -164,3 +165,16 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error al arrancar BookOS Shell");
 }
+
+// ── Color dinámico ───────────────────────────────────────────────────────
+// La paleta la genera BookOS Settings desde el fondo de pantalla y la deja en
+// ~/.config/bookos/palette.css. Aquí solo se lee: quien tiñe es la hoja, que
+// el cliente bookos-palette.js inyecta al final de <head>.
+#[tauri::command]
+fn bookos_palette_css() -> String {
+    std::env::var("HOME").ok()
+        .map(|h| std::path::Path::new(&h).join(".config/bookos/palette.css"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default()
+}
+

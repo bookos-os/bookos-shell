@@ -1,0 +1,53 @@
+# Maintainer: evelyn
+pkgname=bookos-shell
+pkgver=0.6.1
+pkgrel=1
+pkgdesc="Terminal nativa para BookOS — Tauri + xterm.js + portable-pty"
+arch=('x86_64')
+url="https://github.com/BookOS-project/bookos-shell"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg')
+makedepends=('rust' 'nodejs' 'npm')
+options=('!lto')
+install=bookos-shell.install
+source=()
+sha256sums=()
+
+build() {
+    srcroot="$startdir/.."
+    builddir="$srcdir/build"
+    rm -rf "$builddir"
+    mkdir -p "$builddir"
+    cp -r "$srcroot"/{src,src-tauri,package.json,package-lock.json,vite.config.js} "$builddir/"
+
+    cd "$builddir"
+    npm ci
+    npm run tauri build -- --bundles none
+}
+
+package() {
+    builddir="$srcdir/build"
+
+    install -Dm755 "$builddir/src-tauri/target/release/bookos-shell" \
+        "$pkgdir/usr/bin/bookos-shell"
+
+    install -Dm644 "$builddir/src-tauri/icons/icon.png" \
+        "$pkgdir/usr/share/icons/hicolor/512x512/apps/bookos-shell.png"
+
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/bookos-shell.desktop" <<-EOF
+[Desktop Entry]
+Categories=Utility;
+Comment=Terminal nativa para BookOS
+Exec=bookos-shell
+StartupWMClass=bookos-shell
+Icon=bookos-shell
+Name=Shell - Terminal
+Terminal=false
+Type=Application
+EOF
+
+    if [ -f "$builddir/src-tauri/scripts/postinstall.sh" ]; then
+        install -Dm755 "$builddir/src-tauri/scripts/postinstall.sh" \
+            "$pkgdir/usr/share/bookos-shell/postinstall.sh"
+    fi
+}
