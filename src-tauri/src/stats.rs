@@ -10,10 +10,20 @@ use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
 use serde::Serialize;
-use sysinfo::{Disks, Networks, System};
+use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 
 /// Estado persistente: `System` necesita dos lecturas para calcular el % de CPU.
-static SYS: Lazy<Mutex<System>> = Lazy::new(|| Mutex::new(System::new_all()));
+/// Solo CPU y memoria, que es lo único que se lee de él: `System::new_all()`
+/// escaneaba además todos los procesos y los guardaba para siempre. Medido en
+/// book5-pro (sysinfo 0.33.1, 933 procesos): 40,7 ms y +6,1 MB de RSS con
+/// new_all, frente a 0,6 ms y +0,5 MB así; el modelo de CPU sale igual.
+static SYS: Lazy<Mutex<System>> = Lazy::new(|| {
+    Mutex::new(System::new_with_specifics(
+        RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    ))
+});
 
 #[derive(Serialize, Default)]
 pub struct Stats {

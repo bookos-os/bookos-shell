@@ -23,8 +23,11 @@
             theme = theme || "dark";
           }
           document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.classList.toggle("light-mode", theme === "light");
+          document.documentElement.classList.toggle("dark-mode", theme === "dark");
         } catch (e) {
           document.documentElement.setAttribute("data-theme", "dark");
+          document.documentElement.classList.add("dark-mode");
         }
       })();
     </script>
@@ -95,6 +98,20 @@
                 <option value="dark" data-i18n="settings.themeDark">Oscuro</option>
               </select>
             </label>
+            <label class="menu-row menu-check-row">
+              <span data-i18n="settings.caseInsensitive">Comandos tolerantes a mayúsculas</span>
+              <span class="check-control">
+                <input type="checkbox" id="caseInsensitiveToggle" checked />
+                <span class="check-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5" /></svg></span>
+              </span>
+            </label>
+            <label class="menu-row menu-check-row">
+              <span data-i18n="settings.dynamicPalette">Usar colores dinámicos de BookOS Settings</span>
+              <span class="check-control">
+                <input type="checkbox" id="dynamicPaletteToggle" checked />
+                <span class="check-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.75 6 6 9-13.5" /></svg></span>
+              </span>
+            </label>
           </div>
         </div>
       </nav>
@@ -102,9 +119,16 @@
       <!-- Pestañas en el centro; el + aparece pegado a ellas. -->
       <div class="tb-center" id="tabs" data-tauri-drag-region></div>
 
-      <!-- Controles de ventana. Los iconos que duplicaban menús (nueva pestaña,
-           dividir, nueva ventana, panel, perfiles, tema) se quitaron: cada acción
-           sigue en sus menús (Archivo, Ver, Perfiles, Ajustes). -->
+      <div class="tb-tools">
+        <button id="statsToggle" class="titlebar-action" data-action="toggle-stats" data-i18n-title="action.hideStats" title="Ocultar panel de sistema" aria-pressed="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></svg>
+        </button>
+        <button class="palette-button" data-action="open-palette" data-i18n-title="palette.openTitle" title="Paleta de comandos">
+          <span class="palette-magnifier">⌕</span><span data-i18n="palette.open">Comandos</span><kbd>Ctrl K</kbd>
+        </button>
+      </div>
+
+      <!-- Controles de ventana. -->
       <div class="tb-right">
         <div class="controls">
           <button data-win="min" data-i18n-title="wm.minimize" title="Minimizar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
@@ -144,10 +168,38 @@
             <li><span data-i18n="action.closeTab">Cerrar pestaña</span><kbd>Ctrl+W</kbd></li>
             <li><span data-i18n="action.copy">Copiar</span><kbd>Ctrl+Shift+C</kbd></li>
             <li><span data-i18n="action.paste">Pegar</span><kbd>Ctrl+Shift+V</kbd></li>
+            <li><span data-i18n="palette.open">Paleta de comandos</span><kbd>Ctrl+K</kbd></li>
+            <li><span data-i18n="action.toggleStats">Panel de sistema</span><kbd>Ctrl+Shift+S</kbd></li>
+            <li><span data-i18n="palette.nextPane">Cambiar de panel</span><kbd>Ctrl+Alt+←/→</kbd></li>
+            <li><span data-i18n="palette.switchTab">Cambiar de pestaña</span><kbd>Ctrl+AvPág/RePág</kbd></li>
           </ul>
         </div>
       </aside>
     </main>
+
+    <!-- ===== Paleta de comandos ===== -->
+    <div class="modal-backdrop" id="commandPalette" hidden>
+      <section class="command-palette" role="dialog" aria-modal="true" aria-labelledby="paletteTitle">
+        <header class="palette-head">
+          <div>
+            <span class="palette-eyebrow">TTY</span>
+            <h2 id="paletteTitle" data-i18n="palette.title">Paleta de comandos</h2>
+          </div>
+          <button class="modal-close" data-action="close-palette" aria-label="Cerrar">×</button>
+        </header>
+        <div class="palette-search">
+          <span class="palette-magnifier">⌕</span>
+          <input id="paletteInput" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="palette.placeholder" placeholder="Buscar una acción o comando…" />
+          <kbd>Esc</kbd>
+        </div>
+        <div class="palette-list" id="paletteList" role="listbox"></div>
+        <footer class="palette-foot">
+          <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="palette.navigate">navegar</span></span>
+          <span><kbd>Enter</kbd> <span data-i18n="palette.run">ejecutar</span></span>
+          <span class="palette-case-note"><span class="case-dot"></span><span data-i18n="palette.caseNote">búsqueda sin mayúsculas</span></span>
+        </footer>
+      </section>
+    </div>
 
     <!-- ===== Selector de widgets a añadir ===== -->
     <div class="modal-backdrop" id="widgetPicker" hidden>

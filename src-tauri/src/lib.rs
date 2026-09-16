@@ -8,6 +8,7 @@ mod pty;
 mod stats;
 mod theme;
 
+use serde::Serialize;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::{AppHandle, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -71,10 +72,57 @@ async fn list_fonts() -> Vec<String> {
     stats::list_fonts()
 }
 
-/// Tema actual del escritorio ("light" | "dark"), leído al arrancar.
+#[derive(Clone, Serialize)]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+}
+
+/// Devuelve los directorios de una ruta para el selector visual de `cd`.
+/// La ordenación se hace aquí para que sea estable aunque el sistema de
+/// archivos devuelva las entradas en un orden diferente.
 #[tauri::command]
-fn get_theme() -> String {
-    theme::current_theme()
+async fn list_directories(path: String) -> Result<Vec<DirectoryEntry>, String> {
+    let mut dirs = std::fs::read_dir(&path)
+        .map_err(|e| format!("no se puede leer {path}: {e}"))?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if !entry.metadata().ok()?.is_dir() {
+                return None;
+            }
+            Some(DirectoryEntry {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                path: entry.path().to_string_lossy().into_owned(),
+            })
+        })
+        .collect::<Vec<_>>();
+    dirs.sort_by_cached_key(|entry| entry.name.to_lowercase());
+    Ok(dirs)
+}
+
+#[tauri::command]
+async fn home_dir() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+}
+
+/// Devuelve el directorio de trabajo con el que se crean los PTY.
+/// No debe confundirse con HOME: `cd` sin argumentos necesita mostrar las
+/// carpetas del lugar en el que está la terminal al abrirse.
+#[tauri::command]
+async fn initial_cwd() -> String {
+    std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "/".to_string())
+}
+
+/// Tema actual del escritorio ("light" | "dark"), leído al arrancar.
+///
+/// `async` porque la fuente de verdad pasó a ser el portal, y el proxy de zbus
+/// que ya usa el vigilante de cambios solo existe en su forma asíncrona: esta
+/// build trae zbus sin `blocking-api`.
+#[tauri::command]
+async fn get_theme() -> String {
+    theme::current_theme().await
 }
 
 /// Abre una ruta o URL con la app por defecto del sistema (acción de widget:
@@ -107,34 +155,40 @@ async fn new_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// En Linux (WebKitGTK) fija el zoom del WebView a 1.0 y lo bloquea ante
-/// cualquier intento de cambio (pinch del touchpad, atajos nativos).
-#[cfg(target_os = "linux")]
-fn disable_webview_zoom(app: &tauri::App) {
-    use tauri::Manager;
-    use webkit2gtk::{WebViewExt, SettingsExt};
+/// Quita el zoom de página que WebKitGTK hace con el pellizco del touchpad.
+///
+/// No hay ajuste para eso ni en WebKit ni en Tauri, y la página no se entera:
+/// el pellizco lo consume un `GtkGestureZoom` de la propia vista y llega como
+/// `setMagnification`, no como `wheel` ni `touch*`, así que ningún
+/// `preventDefault` lo frena. Tampoco devolver `zoom_level` a 1.0, que es lo
+/// que se hacía aquí antes: la magnificación es otra escala y no lo toca. Se
+/// apaga ese gesto y ningún otro: con fase `None` GTK deja de pasarle eventos
+/// (gtkeventcontroller.c, 3.24). Va en `on_page_load` para cubrir también las
+/// ventanas de `new_window`, que el bucle de `setup` no veía.
+fn desactivar_zoom_por_pellizco<R: tauri::Runtime>(
+    webview: &tauri::Webview<R>,
+    _: &tauri::webview::PageLoadPayload<'_>,
+) {
+    #[cfg(target_os = "linux")]
+    let _ = webview.with_webview(|webview| {
+        use gtk::glib::translate::from_glib_none;
+        use gtk::prelude::*;
 
-    for (_label, window) in app.webview_windows() {
-        let _ = window.with_webview(|webview| {
-            let wv = webview.inner(); // webkit2gtk::WebView
-            wv.set_zoom_level(1.0);
-            if let Some(settings) = WebViewExt::settings(&wv) {
-                // Evita que el zoom afecte solo al texto y bloquea gestos.
-                settings.set_zoom_text_only(false);
-            }
-            // Si algo cambia el zoom, lo devolvemos a 1.0 al instante.
-            wv.connect_zoom_level_notify(|w| {
-                if (w.zoom_level() - 1.0).abs() > f64::EPSILON {
-                    w.set_zoom_level(1.0);
-                }
-            });
-        });
-    }
+        // WebKitGTK guarda ahí el gesto (WebKitWebViewBase.cpp, 2.52.5). No es
+        // API pública: si la clave cambia, no se encuentra y el zoom vuelve.
+        // Lo guardado es un puntero C a un GObject, no un tipo de Rust.
+        let Some(gesto) = (unsafe { webview.inner().data::<gtk::ffi::GtkGesture>("wk-view-zoom-gesture") }) else {
+            return;
+        };
+        let gesto: gtk::Gesture = unsafe { from_glib_none(gesto.as_ptr()) };
+        gesto.set_propagation_phase(gtk::PropagationPhase::None);
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_page_load(desactivar_zoom_por_pellizco)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -143,11 +197,6 @@ pub fn run() {
         .setup(|app| {
             // Arranca el listener de tema del escritorio.
             theme::spawn_listener(app.handle().clone());
-            // Desactiva el pinch-zoom del touchpad en WebKitGTK (Linux): el
-            // gesto lo procesa el WebView a nivel nativo, no llega a JS. Aquí
-            // bloqueamos cualquier cambio de zoom reseteándolo a 1.0.
-            #[cfg(target_os = "linux")]
-            disable_webview_zoom(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -158,6 +207,9 @@ pub fn run() {
             pty_kill,
             get_stats,
             list_fonts,
+            list_directories,
+            home_dir,
+            initial_cwd,
             get_theme,
             open_path,
             new_window,
@@ -177,4 +229,3 @@ fn bookos_palette_css() -> String {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_default()
 }
-

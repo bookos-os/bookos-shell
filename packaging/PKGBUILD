@@ -34,17 +34,8 @@ package() {
     install -Dm644 "$builddir/src-tauri/icons/icon.png" \
         "$pkgdir/usr/share/icons/hicolor/512x512/apps/bookos-shell.png"
 
-    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/bookos-shell.desktop" <<-EOF
-[Desktop Entry]
-Categories=Utility;
-Comment=Terminal nativa para BookOS
-Exec=bookos-shell
-StartupWMClass=bookos-shell
-Icon=bookos-shell
-Name=Shell - Terminal
-Terminal=false
-Type=Application
-EOF
+    install -Dm644 "$startdir/bookos-shell.desktop" \
+        "$pkgdir/usr/share/applications/bookos-shell.desktop"
 
     if [ -f "$builddir/src-tauri/scripts/postinstall.sh" ]; then
         install -Dm755 "$builddir/src-tauri/scripts/postinstall.sh" \

@@ -1,6 +1,6 @@
 {
   "name": "bookos-shell",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "description": "Terminal nativa para BookOS — Tauri + xterm.js + portable-pty",
   "type": "module",
   "scripts": {

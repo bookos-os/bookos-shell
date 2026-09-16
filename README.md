@@ -23,6 +23,13 @@ apps de BookOS (estilo Apple/macOS).
   modo claro u oscuro.
 - **Múltiples ventanas** (como Notepad), **pestañas** y **vista dividida**
   (izquierda/derecha o arriba/abajo).
+- **Paleta de comandos** (`Ctrl+K`) con búsqueda sin distinguir mayúsculas ni
+  acentos, navegación con flechas y comandos frecuentes listos para ejecutar.
+- **Entrada asistida**: el nombre del comando tolera mayúsculas (`LS`, `PWD`,
+  `CD`), mientras que los argumentos y las rutas se mantienen intactos.
+- **Selector TUI de directorios para `cd`**: usa el buffer de la propia
+  terminal al escribir `cd`; puedes elegir una carpeta con flechas y `Enter`.
+  También propone coincidencias como `bookos` → `BookOS` y corrige errores.
 - **Bilingüe** (español / inglés) con i18n en todos los menús, submenús,
   botones y el panel de sistema.
 - **Panel de sistema** estilo _neofetch_: CPU, GPU, Memoria, Swap, Disco,
@@ -118,6 +125,14 @@ Genera paquetes `.deb`, `.rpm` y `.AppImage` en
 | Pegar                    | `Ctrl+Shift+V`   |
 | Ampliar / reducir texto  | `Ctrl++` / `Ctrl+-` |
 | Tamaño normal            | `Ctrl+0`         |
+| Paleta de comandos       | `Ctrl+K` / `Ctrl+Shift+P` |
+| Mostrar / ocultar sistema | `Ctrl+Shift+S` |
+| Cambiar de panel         | `Ctrl+Alt+←/→`   |
+| Cambiar de pestaña       | `Ctrl+PageUp` / `Ctrl+PageDown` |
+
+Al escribir `cd` sin argumentos se abre el selector de directorios del panel
+activo. Usa ↑/↓ para moverte, escribe para filtrar y pulsa `Enter` para entrar.
+`Esc` cancela la selección.
 
 ---
 

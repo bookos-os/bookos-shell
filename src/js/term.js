@@ -34,10 +34,33 @@ const TERM_THEMES = {
   },
 };
 
+function resolvedTermTheme(theme) {
+  const fallback = TERM_THEMES[theme] || TERM_THEMES.dark;
+  const styles = getComputedStyle(document.documentElement);
+  const read = (name, value) => styles.getPropertyValue(name).trim() || value;
+  const background = read("--bg-term", fallback.background);
+  const accent = read("--accent", fallback.cursor);
+  return {
+    ...fallback,
+    background,
+    foreground: read("--fg", fallback.foreground),
+    cursor: accent,
+    cursorAccent: background,
+    selectionBackground: read("--selection", fallback.selectionBackground),
+    blue: accent,
+  };
+}
+
 let counter = 0;
 
 /** Crea una terminal dentro de `container`. Devuelve un handle con su id. */
-export function createTerminal(container, { theme, profile, onTitle } = {}) {
+export function createTerminal(container, {
+  theme,
+  profile,
+  onTitle,
+  onCommandLine,
+  caseInsensitiveCommands = true,
+} = {}) {
   const id = `pty-${Date.now()}-${counter++}`;
   const term = new Terminal({
     fontFamily: `${profile?.font || "Hack"}, "SF Mono", monospace`,
@@ -47,7 +70,7 @@ export function createTerminal(container, { theme, profile, onTitle } = {}) {
     // WebView (WebKitGTK) paga composición alfa en cada frame para nada.
     allowTransparency: false,
     scrollback: 10000,
-    theme: TERM_THEMES[theme] || TERM_THEMES.dark,
+    theme: resolvedTermTheme(theme),
   });
 
   // Deja pasar los atajos de la app (Ctrl+T/W/N, divisiones, zoom, copiar/
@@ -56,9 +79,11 @@ export function createTerminal(container, { theme, profile, onTitle } = {}) {
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
     const k = e.key.toLowerCase();
-    if (e.ctrlKey && !e.shiftKey && ["t", "n", "w"].includes(k)) return false;
-    if (e.ctrlKey && e.shiftKey && ["d", "e", "c", "v"].includes(k)) return false;
+    if (e.ctrlKey && !e.shiftKey && ["t", "n", "w", "k"].includes(k)) return false;
+    if (e.ctrlKey && e.shiftKey && ["d", "e", "c", "v", "p", "s"].includes(k)) return false;
     if (e.ctrlKey && ["+", "=", "-", "0"].includes(e.key)) return false;
+    if (e.ctrlKey && e.altKey && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return false;
+    if (e.ctrlKey && ["PageUp", "PageDown"].includes(e.key)) return false;
     return true;
   });
 
@@ -92,8 +117,73 @@ export function createTerminal(container, { theme, profile, onTitle } = {}) {
     term.write(`\x1b[31m[bookos-shell] no se pudo iniciar la shell: ${e}\x1b[0m\r\n`);
   });
 
+  // Seguimiento ligero de la línea actual. Permite que "LS" se ejecute como
+  // "ls" sin tocar argumentos ni rutas: "CD /TMP" se convierte en
+  // "cd /TMP". Si el usuario usa edición avanzada, historial o una secuencia
+  // ANSI, dejamos que la shell procese la entrada tal cual.
+  let inputLine = "";
+  let inputTrackable = true;
+  let tolerateCommandCase = caseInsensitiveCommands;
+  let inputModeHandler = null;
+
+  function commandAwareData(data) {
+    if (!tolerateCommandCase || data !== "\r" || !inputTrackable) return data;
+    const match = inputLine.match(/^(\s*)([A-Za-z_][A-Za-z0-9_+.-]*)(.*)$/s);
+    if (!match) return data;
+    const command = match[2];
+    const normalized = command.toLocaleLowerCase();
+    if (command === normalized) return data;
+    // Ctrl+U limpia la línea de readline y la reescribimos con el comando
+    // normalizado. Los argumentos quedan exactamente como los introdujo el
+    // usuario, incluidos nombres de archivo con mayúsculas.
+    return `\x15${match[1]}${normalized}${match[3]}\r`;
+  }
+
+  function writeToPty(data) {
+    invoke("pty_write", { id, data }).catch((e) =>
+      console.warn("[bookos-shell] no se pudo escribir en el PTY:", e)
+    );
+  }
+
+  function trackInput(data) {
+    for (const char of data) {
+      if (char === "\r" || char === "\n") {
+        inputLine = "";
+        inputTrackable = true;
+      } else if (char === "\x03" || char === "\x15") {
+        inputLine = "";
+        inputTrackable = true;
+      } else if (char === "\x7f" || char === "\b") {
+        inputLine = inputLine.slice(0, -1);
+      } else if (char === "\x1b") {
+        inputTrackable = false;
+      } else if (char < " ") {
+        // Ctrl+A/E/W y otras órdenes de readline mueven el cursor; desde ese
+        // punto ya no podemos reconstruir la línea con seguridad.
+        inputTrackable = false;
+      } else if (char >= " " && char !== "\x7f" && inputTrackable) {
+        inputLine += char;
+      }
+    }
+  }
+
   // Teclas -> PTY.
-  term.onData((data) => invoke("pty_write", { id, data }));
+  term.onData((data) => {
+    if (inputModeHandler) {
+      inputModeHandler(data);
+      return;
+    }
+    if (data === "\r" && inputTrackable && onCommandLine?.(inputLine, writeToPty)) {
+      // El selector toma el control de una línea `cd`; quitamos el texto que
+      // readline ya ha mostrado mientras esperamos la elección del usuario.
+      trackInput(data);
+      writeToPty("\x15");
+      return;
+    }
+    const outgoing = commandAwareData(data);
+    trackInput(data);
+    writeToPty(outgoing);
+  });
 
   // Título dinámico (secuencias OSC del shell).
   term.onTitleChange((title) => onTitle?.(title));
@@ -135,12 +225,18 @@ export function createTerminal(container, { theme, profile, onTitle } = {}) {
       term.dispose();
     },
     applyTheme(t) {
-      term.options.theme = TERM_THEMES[t] || TERM_THEMES.dark;
+      term.options.theme = resolvedTermTheme(t);
     },
     applyProfile(p) {
       if (p.font) term.options.fontFamily = `${p.font}, "SF Mono", monospace`;
       if (p.fontSize) term.options.fontSize = p.fontSize;
       this.refit();
+    },
+    setCaseInsensitive(enabled) {
+      tolerateCommandCase = enabled;
+    },
+    setInputMode(handler) {
+      inputModeHandler = handler;
     },
     setFontSize(px) {
       term.options.fontSize = px;

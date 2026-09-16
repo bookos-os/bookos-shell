@@ -48,12 +48,29 @@ fn extract_u32(val: &OwnedValue) -> Option<u32> {
     None
 }
 
-/// Lee el tema actual del escritorio de forma síncrona, para usarlo al
-/// arrancar sin depender de que el portal D-Bus emita el primer evento.
+/// Lee el tema actual del escritorio al arrancar, sin esperar a que el portal
+/// emita el primer evento.
 ///
-/// Estrategia: primero `kdeglobals` (KDE Plasma — tu caso), luego una
-/// heurística sobre la variable de entorno; por defecto "light".
-pub fn current_theme() -> String {
+/// El portal primero, que es la misma fuente que luego manda los cambios: lo
+/// sirve la sesión que esté corriendo —BookOS desde el propio compositor,
+/// Plasma y GNOME desde los suyos—. `kdeglobals` queda solo de reserva: es de
+/// Plasma, y en una sesión BookOS no lo escribe nadie porque el tema se elige
+/// en Apariencia y vive en `panel.conf`, así que el shell abría con el tema
+/// con el que se instaló el sistema.
+pub async fn current_theme() -> String {
+    if let Ok(conn) = Connection::session().await {
+        if let Ok(proxy) = SettingsProxy::new(&conn).await {
+            if let Ok(val) = proxy
+                .read_one("org.freedesktop.appearance", "color-scheme")
+                .await
+            {
+                // El 0 es «sin preferencia»: ahí sí toca mirar lo de abajo.
+                if let Some(n @ (1 | 2)) = extract_u32(&val) {
+                    return scheme_to_str(n).into();
+                }
+            }
+        }
+    }
     if let Some(home) = std::env::var_os("HOME") {
         let path = std::path::Path::new(&home).join(".config/kdeglobals");
         if let Ok(content) = std::fs::read_to_string(&path) {

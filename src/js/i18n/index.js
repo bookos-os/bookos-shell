@@ -21,6 +21,8 @@ export const dict = {
     "action.zoomOut": "Reducir texto",
     "action.zoomReset": "Tamaño normal",
     "action.toggleStats": "Panel de sistema",
+    "action.hideStats": "Ocultar panel de sistema",
+    "action.showStats": "Mostrar panel de sistema",
     "action.manageProfiles": "Gestionar perfiles…",
 
     "settings.language": "Idioma",
@@ -28,6 +30,31 @@ export const dict = {
     "settings.themeAuto": "Automático",
     "settings.themeLight": "Claro",
     "settings.themeDark": "Oscuro",
+    "settings.caseInsensitive": "Permitir comandos con mayúsculas",
+    "settings.dynamicPalette": "Usar colores dinámicos de BookOS Settings",
+
+    "palette.title": "Paleta de comandos",
+    "palette.open": "Comandos",
+    "palette.openTitle": "Abrir paleta de comandos",
+    "palette.placeholder": "Buscar una acción o comando…",
+    "palette.navigate": "navegar",
+    "palette.run": "ejecutar",
+    "palette.caseNote": "búsqueda sin mayúsculas",
+    "palette.empty": "No hay coincidencias",
+    "palette.nextPane": "Cambiar de panel",
+    "palette.switchTab": "Cambiar de pestaña",
+    "palette.pwd": "Mostrar directorio actual",
+    "palette.list": "Listar archivos detalladamente",
+    "palette.disk": "Mostrar espacio de disco",
+    "palette.memory": "Mostrar memoria disponible",
+    "palette.processes": "Mostrar procesos activos",
+    "directory.title": "Elegir directorio",
+    "directory.suggest": "¿Querías decir",
+    "directory.filter": "filtro",
+    "directory.move": "mover",
+    "directory.enter": "entrar",
+    "directory.cancel": "cancelar",
+    "directory.empty": "No hay carpetas que coincidan",
 
     "sys.title": "Sistema",
     "sys.cpu": "CPU",
@@ -95,6 +122,8 @@ export const dict = {
     "action.zoomOut": "Zoom out",
     "action.zoomReset": "Actual size",
     "action.toggleStats": "System panel",
+    "action.hideStats": "Hide system panel",
+    "action.showStats": "Show system panel",
     "action.manageProfiles": "Manage profiles…",
 
     "settings.language": "Language",
@@ -102,6 +131,31 @@ export const dict = {
     "settings.themeAuto": "Automatic",
     "settings.themeLight": "Light",
     "settings.themeDark": "Dark",
+    "settings.caseInsensitive": "Allow uppercase commands",
+    "settings.dynamicPalette": "Use dynamic BookOS Settings colors",
+
+    "palette.title": "Command palette",
+    "palette.open": "Commands",
+    "palette.openTitle": "Open command palette",
+    "palette.placeholder": "Search an action or command…",
+    "palette.navigate": "navigate",
+    "palette.run": "run",
+    "palette.caseNote": "case insensitive search",
+    "palette.empty": "No matches",
+    "palette.nextPane": "Switch pane",
+    "palette.switchTab": "Switch tab",
+    "palette.pwd": "Show current directory",
+    "palette.list": "List files in detail",
+    "palette.disk": "Show disk space",
+    "palette.memory": "Show available memory",
+    "palette.processes": "Show active processes",
+    "directory.title": "Choose directory",
+    "directory.suggest": "Did you mean",
+    "directory.filter": "filter",
+    "directory.move": "move",
+    "directory.enter": "enter",
+    "directory.cancel": "cancel",
+    "directory.empty": "No matching folders",
 
     "sys.title": "System",
     "sys.cpu": "CPU",
@@ -180,5 +234,9 @@ export function applyI18n() {
   document.querySelectorAll("[data-i18n-title]").forEach((el) => {
     const key = el.getAttribute("data-i18n-title");
     if (table[key]) el.title = table[key];
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-placeholder");
+    if (table[key]) el.placeholder = table[key];
   });
 }

@@ -9,6 +9,24 @@ import * as Profiles from "./profiles.js";
 import * as Widgets from "./widgets.js";
 
 const win = getCurrentWindow();
+// bookos-palette.js se carga como script clásico y Tauri no expone
+// window.__TAURI__ en esta configuración. Le damos el invoke oficial del
+// módulo para que la paleta pueda sincronizarse sin abrir esa superficie global.
+window.bookosPalette?.setInvoker(invoke);
+
+// La ventana transparente dibuja sus propias esquinas: redondeadas en modo
+// ventana y rectas al maximizar, como pide el sistema visual de BookOS.
+let lastWindowMaximized = null;
+async function syncWindowShape() {
+  try {
+    const maximized = await win.isMaximized();
+    if (maximized === lastWindowMaximized) return;
+    lastWindowMaximized = maximized;
+    document.documentElement.classList.toggle("window-maximized", maximized);
+  } catch {}
+}
+if (win.onResized) win.onResized(() => syncWindowShape()).catch(() => {});
+syncWindowShape();
 
 // =====================================================================
 //  Robustez de entrada (touchpad / menú contextual / errores)
@@ -69,10 +87,17 @@ const state = {
   tabs: [], // { id, title, viewEl, terms: [handle], split: "none"|"horizontal"|"vertical", focused }
   activeTab: null,
   fontSize: 14,
+  caseInsensitiveCommands: localStorage.getItem("bookos.caseInsensitiveCommands") !== "false",
+  dynamicPalette: localStorage.getItem("bookos.dynamicPalette") !== "false",
+  statsHidden: localStorage.getItem("bookos.statsHidden") === "true",
 };
 
 // Mapa id-de-pty -> handle de terminal, para enrutar datos del backend.
 const termsById = new Map();
+// Última ruta conocida de cada PTY. Se usa para que el selector de `cd` abra
+// la carpeta en la que está trabajando cada panel.
+const cwdByPty = new Map();
+const homeByPty = new Map();
 
 // =====================================================================
 //  Tema
@@ -80,6 +105,8 @@ const termsById = new Map();
 function applyTheme(theme) {
   state.theme = theme;
   document.documentElement.setAttribute("data-theme", theme);
+  document.documentElement.classList.toggle("light-mode", theme === "light");
+  document.documentElement.classList.toggle("dark-mode", theme === "dark");
   // Persistimos el tema REAL resuelto: el script inline de index.html lo lee
   // en el siguiente arranque para abrir ya con el tema correcto (anti-flash).
   try { localStorage.setItem("bookos.theme", theme); } catch {}
@@ -96,6 +123,12 @@ function applyTheme(theme) {
 function resolveAutoTheme(systemTheme) {
   if (state.themeMode === "auto") applyTheme(systemTheme);
 }
+
+window.addEventListener("bookos-palette-changed", () => {
+  // xterm.js no lee variables CSS por sí solo: repintamos sus roles base cada
+  // vez que Settings entrega una paleta o cuando el usuario la desactiva.
+  for (const handle of termsById.values()) handle.applyTheme(state.theme);
+});
 
 // =====================================================================
 //  Pestañas y divisiones
@@ -129,11 +162,25 @@ function createTab(profile = null) {
 function addPaneToTab(tab, profile = null) {
   const pane = document.createElement("div");
   pane.className = "pane";
+  pane.innerHTML = `
+    <div class="pane-toolbar">
+      <span class="tty-badge"><i></i> TTY</span>
+      <button class="pane-command-button" data-action="open-palette" data-i18n-title="palette.openTitle" title="${escapeHtml(t("palette.openTitle"))}">
+        <span data-i18n="palette.open">${escapeHtml(t("palette.open"))}</span><kbd>Ctrl K</kbd>
+      </button>
+    </div>`;
   tab.viewEl.appendChild(pane);
 
-  const handle = createTerminal(pane, {
+  let handle;
+  handle = createTerminal(pane, {
     theme: state.theme,
     profile,
+    caseInsensitiveCommands: state.caseInsensitiveCommands,
+    onCommandLine: (line, submit) => {
+      if (!isAssistableCdLine(line)) return false;
+      assistCdCommand(handle, line, submit);
+      return true;
+    },
     onTitle: (title) => {
       tab.title = title || tab.title;
       renderTabs();
@@ -192,8 +239,11 @@ function closeTab(id) {
   const idx = state.tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
   const tab = state.tabs[idx];
+  if (directoryPending && tab.terms.includes(directoryPending.handle)) closeDirectoryPicker();
   tab.terms.forEach((h) => {
     termsById.delete(h.id);
+    cwdByPty.delete(h.id);
+    homeByPty.delete(h.id);
     h.dispose();
   });
   tab.viewEl.remove();
@@ -260,6 +310,16 @@ function focusedHandle() {
   return tab?.terms[tab.focusedIndex];
 }
 
+function syncStatsToggle() {
+  const button = document.getElementById("statsToggle");
+  if (!button) return;
+  const key = state.statsHidden ? "action.showStats" : "action.hideStats";
+  button.classList.toggle("active", !state.statsHidden);
+  button.setAttribute("aria-pressed", String(!state.statsHidden));
+  button.setAttribute("data-i18n-title", key);
+  button.title = t(key);
+}
+
 const actions = {
   "new-tab": () => createTab(),
   "new-window": () => invoke("new_window"),
@@ -285,9 +345,15 @@ const actions = {
   "zoom-in": () => zoom(1),
   "zoom-out": () => zoom(-1),
   "zoom-reset": zoomReset,
+  "open-palette": () => openCommandPalette(),
+  "close-palette": () => closeCommandPalette(),
+  "next-pane": () => focusPane(1),
   "toggle-stats": () => {
     const panel = document.getElementById("syspanel");
-    panel.classList.toggle("hidden");
+    state.statsHidden = !state.statsHidden;
+    localStorage.setItem("bookos.statsHidden", String(state.statsHidden));
+    panel.classList.toggle("hidden", state.statsHidden);
+    syncStatsToggle();
     // Datos frescos nada más abrir (el sondeo se pausa con el panel oculto).
     if (!panel.classList.contains("hidden")) refreshStats(true);
     // Refit CONTINUO durante la animación del panel: el ancho del .pane cambia
@@ -309,6 +375,444 @@ const actions = {
   "close-picker": () => (document.getElementById("widgetPicker").hidden = true),
   "close-config": () => (document.getElementById("widgetConfig").hidden = true),
 };
+
+// =====================================================================
+//  Paleta de comandos: acciones y comandos frecuentes navegables
+// =====================================================================
+const palette = document.getElementById("commandPalette");
+const paletteInput = document.getElementById("paletteInput");
+const paletteList = document.getElementById("paletteList");
+let paletteMatches = [];
+let paletteIndex = 0;
+
+const paletteItems = [
+  { id: "new-tab", kind: "action", icon: "+", labelKey: "action.newTab", shortcut: "Ctrl T" },
+  { id: "next-pane", kind: "action", icon: "↔", labelKey: "palette.nextPane", shortcut: "Ctrl Alt ←/→" },
+  { id: "split-h", kind: "action", icon: "═", labelKey: "action.splitH", shortcut: "Ctrl Shift D" },
+  { id: "split-v", kind: "action", icon: "║", labelKey: "action.splitV", shortcut: "Ctrl Shift E" },
+  { id: "toggle-stats", kind: "action", icon: "▦", labelKey: "action.toggleStats", shortcut: "" },
+  { id: "clear", kind: "action", icon: "⌫", labelKey: "action.clear", shortcut: "" },
+  { id: "zoom-in", kind: "action", icon: "A+", labelKey: "action.zoomIn", shortcut: "Ctrl +" },
+  { id: "zoom-out", kind: "action", icon: "A−", labelKey: "action.zoomOut", shortcut: "Ctrl −" },
+  { id: "pwd", kind: "command", icon: "⌂", labelKey: "palette.pwd", command: "pwd" },
+  { id: "list", kind: "command", icon: "▤", labelKey: "palette.list", command: "ls -la" },
+  { id: "disk", kind: "command", icon: "◒", labelKey: "palette.disk", command: "df -h" },
+  { id: "memory", kind: "command", icon: "▥", labelKey: "palette.memory", command: "free -h" },
+  { id: "processes", kind: "command", icon: "≋", labelKey: "palette.processes", command: "ps -ef | head -20" },
+];
+
+function foldText(value) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase();
+}
+
+function runPaletteItem(item) {
+  if (item.kind === "action") {
+    actions[item.id]?.();
+  } else {
+    const h = focusedHandle();
+    if (h) invoke("pty_write", { id: h.id, data: `${item.command}\r` });
+  }
+  closeCommandPalette();
+}
+
+function renderCommandPalette() {
+  const query = foldText(paletteInput.value.trim());
+  paletteMatches = paletteItems.filter((item) => {
+    const text = foldText(`${t(item.labelKey)} ${item.command || ""} ${item.shortcut || ""}`);
+    return !query || text.includes(query);
+  });
+  paletteIndex = Math.min(paletteIndex, Math.max(0, paletteMatches.length - 1));
+  paletteList.innerHTML = "";
+  if (!paletteMatches.length) {
+    paletteList.innerHTML = `<div class="palette-empty">${escapeHtml(t("palette.empty"))}</div>`;
+    return;
+  }
+  paletteMatches.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.className = `palette-item${index === paletteIndex ? " active" : ""}`;
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", index === paletteIndex ? "true" : "false");
+    button.innerHTML = `<span class="palette-icon">${escapeHtml(item.icon)}</span>
+      <span class="palette-label"><strong>${escapeHtml(t(item.labelKey))}</strong>
+      ${item.command ? `<small>${escapeHtml(item.command)}</small>` : ""}</span>
+      ${item.shortcut ? `<kbd>${escapeHtml(item.shortcut)}</kbd>` : ""}`;
+    button.onclick = () => runPaletteItem(item);
+    paletteList.appendChild(button);
+  });
+}
+
+function openCommandPalette() {
+  closeAllMenus();
+  palette.hidden = false;
+  paletteIndex = 0;
+  paletteInput.value = "";
+  renderCommandPalette();
+  requestAnimationFrame(() => paletteInput.focus());
+}
+
+function closeCommandPalette() {
+  palette.hidden = true;
+  focusedHandle()?.term.focus();
+}
+
+// =====================================================================
+//  Selector TUI de directorios para `cd`
+// =====================================================================
+// Se dibuja en el buffer alternativo de xterm, igual que fzf/nano/htop. Así
+// no hay una tarjeta HTML flotando dentro de la terminal: el selector ocupa
+// temporalmente la pantalla de la propia consola y vuelve al buffer anterior
+// al elegir o cancelar.
+let directoryPending = null;
+let directoryQuery = "";
+let directoryIndex = 0;
+
+function normalizePosixPath(path) {
+  const absolute = path.startsWith("/");
+  const parts = [];
+  for (const part of path.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (parts.length && parts[parts.length - 1] !== "..") parts.pop();
+      else if (!absolute) parts.push(part);
+    } else {
+      parts.push(part);
+    }
+  }
+  return `${absolute ? "/" : ""}${parts.join("/")}` || (absolute ? "/" : ".");
+}
+
+function dirname(path) {
+  const normalized = normalizePosixPath(path);
+  if (normalized === "/") return "/";
+  const slash = normalized.lastIndexOf("/");
+  return slash <= 0 ? "/" : normalized.slice(0, slash);
+}
+
+function basename(path) {
+  const normalized = normalizePosixPath(path);
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
+}
+
+function stripCdQuotes(value) {
+  const text = value.trim();
+  if (text.length >= 2 && ((text.startsWith("'") && text.endsWith("'")) || (text.startsWith('"') && text.endsWith('"')))) {
+    return text.slice(1, -1);
+  }
+  return text;
+}
+
+function shellQuote(path) {
+  return `'${path.replace(/'/g, "'\\''")}'`;
+}
+
+function editDistance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let previous = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const current = row[j];
+      row[j] = Math.min(
+        row[j] + 1,
+        row[j - 1] + 1,
+        previous + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      previous = current;
+    }
+  }
+  return row[b.length];
+}
+
+async function knownCwd(handle) {
+  if (cwdByPty.has(handle.id)) return cwdByPty.get(handle.id);
+  try {
+    const cwd = await invoke("initial_cwd");
+    cwdByPty.set(handle.id, cwd);
+    return cwd;
+  } catch {
+    const home = await homeDirectory(handle);
+    cwdByPty.set(handle.id, home);
+    return home;
+  }
+}
+
+async function homeDirectory(handle) {
+  if (homeByPty.has(handle.id)) return homeByPty.get(handle.id);
+  try {
+    const home = await invoke("home_dir");
+    homeByPty.set(handle.id, home);
+    return home;
+  } catch {
+    return "/";
+  }
+}
+
+function isAssistableCdLine(line) {
+  const match = line.match(/^\s*cd(?:\s+(.+?))?\s*$/i);
+  return Boolean(match && !/[;&|<>]/.test(match[1] || ""));
+}
+
+function terminalSafeText(value) {
+  return String(value).replace(/[\x00-\x1f\x7f]/g, "?");
+}
+
+function directoryMatchesForQuery() {
+  const query = foldText(directoryQuery.trim());
+  return (directoryPending?.entries || []).filter((entry) => {
+    return !query || foldText(`${entry.name} ${entry.path}`).includes(query);
+  });
+}
+
+function renderInlineDirectoryPicker() {
+  if (!directoryPending) return;
+  const { handle, entries, cwd, suggestion } = directoryPending;
+  const matches = directoryMatchesForQuery();
+  directoryIndex = Math.min(directoryIndex, Math.max(0, matches.length - 1));
+  const width = Math.max(1, handle.term.cols);
+  const maxName = Math.max(10, ...matches.map((entry) => terminalSafeText(entry.name).length));
+  const columns = Math.max(1, Math.min(6, Math.floor((width + 2) / Math.min(maxName + 3, 28))));
+  const rows = Math.max(1, Math.ceil(matches.length / columns));
+  const esc = "\x1b[";
+  const title = suggestion
+    ? `${t("directory.suggest")} ${terminalSafeText(suggestion.name)}?`
+    : t("directory.title");
+  const lines = [
+    `${esc}1;32m${terminalSafeText(title)}${esc}0m  ${esc}2m${terminalSafeText(cwd)}${esc}0m`,
+    `${esc}2m${terminalSafeText(t("directory.filter"))}: ${terminalSafeText(directoryQuery) || "—"}${esc}0m`,
+    "",
+  ];
+
+  if (!matches.length) {
+    lines.push(`${esc}2m${terminalSafeText(t("directory.empty"))}${esc}0m`);
+  } else {
+    for (let row = 0; row < rows; row++) {
+      let line = "";
+      for (let column = 0; column < columns; column++) {
+        const index = column * rows + row;
+        const entry = matches[index];
+        if (!entry) continue;
+        const name = terminalSafeText(entry.name);
+        const selected = index === directoryIndex;
+        const padded = name.padEnd(Math.min(maxName, 26) + 2, " ");
+        line += selected
+          ? `${esc}7;1;34m ${padded}${esc}0m`
+          : `${esc}1;34m${padded}${esc}0m`;
+      }
+      lines.push(line);
+    }
+  }
+  lines.push(
+    "",
+    `${esc}2m← ↑ ↓ → ${t("directory.move")}   Enter ${t("directory.enter")}   Esc ${t("directory.cancel")}${esc}0m`,
+  );
+  handle.term.write(`${esc}2J${esc}H${lines.join("\r\n")}`);
+}
+
+function openDirectoryPicker(handle, entries, submit, suggestion = null, cwd = "") {
+  directoryPending = { handle, entries, submit, cwd, suggestion };
+  directoryQuery = "";
+  directoryIndex = 0;
+  handle.setInputMode(handleDirectoryInput);
+  // El buffer alternativo es la misma técnica que usan los navegadores TUI:
+  // el contenido anterior se restaura automáticamente al salir.
+  handle.term.write("\x1b[?1049h\x1b[2J\x1b[H");
+  renderInlineDirectoryPicker();
+}
+
+function closeDirectoryPicker(submit = null) {
+  if (!directoryPending) return;
+  const pending = directoryPending;
+  pending.handle.setInputMode(null);
+  pending.handle.term.write("\x1b[?1049l");
+  directoryPending = null;
+  directoryQuery = "";
+  if (submit) submit();
+  pending.handle.term.focus();
+}
+
+function chooseDirectory(entry) {
+  if (!directoryPending) return;
+  const { handle, submit } = directoryPending;
+  cwdByPty.set(handle.id, entry.path);
+  closeDirectoryPicker(() => submit(`cd ${shellQuote(entry.path)}\r`));
+}
+
+function moveDirectorySelection(deltaColumn, deltaRow) {
+  if (!directoryPending) return;
+  const matches = directoryMatchesForQuery();
+  if (!matches.length) return;
+  const width = Math.max(1, directoryPending.handle.term.cols);
+  const maxName = Math.max(10, ...matches.map((entry) => terminalSafeText(entry.name).length));
+  const columns = Math.max(1, Math.min(6, Math.floor((width + 2) / Math.min(maxName + 3, 28))));
+  const rows = Math.max(1, Math.ceil(matches.length / columns));
+  const column = Math.floor(directoryIndex / rows);
+  const row = directoryIndex % rows;
+  const nextColumn = Math.max(0, Math.min(columns - 1, column + deltaColumn));
+  const nextRow = Math.max(0, Math.min(rows - 1, row + deltaRow));
+  const next = nextColumn * rows + nextRow;
+  if (next < matches.length) directoryIndex = next;
+  renderInlineDirectoryPicker();
+}
+
+function handleDirectoryInput(data) {
+  if (!directoryPending) return;
+  if (data === "\x1b[A") moveDirectorySelection(0, -1);
+  else if (data === "\x1b[B") moveDirectorySelection(0, 1);
+  else if (data === "\x1b[C") moveDirectorySelection(1, 0);
+  else if (data === "\x1b[D") moveDirectorySelection(-1, 0);
+  else if (data === "\r") {
+    const matches = directoryMatchesForQuery();
+    if (matches[directoryIndex]) chooseDirectory(matches[directoryIndex]);
+  } else if (data === "\x1b" || data === "\x03") {
+    closeDirectoryPicker();
+  } else if (data === "\x7f" || data === "\b") {
+    directoryQuery = directoryQuery.slice(0, -1);
+    directoryIndex = 0;
+    renderInlineDirectoryPicker();
+  } else if (data === "\x15") {
+    directoryQuery = "";
+    directoryIndex = 0;
+    renderInlineDirectoryPicker();
+  } else if (data && !/[\x00-\x1f\x7f]/.test(data)) {
+    directoryQuery += data;
+    directoryIndex = 0;
+    renderInlineDirectoryPicker();
+  }
+}
+
+async function assistCdCommand(handle, line, submit) {
+  const match = line.match(/^\s*cd(?:\s+(.+?))?\s*$/i);
+  if (!match || /[;&|<>]/.test(match[1] || "")) return false;
+
+  const cwd = await knownCwd(handle);
+  let entries;
+  try {
+    entries = await invoke("list_directories", { path: cwd });
+  } catch (error) {
+    console.warn("[bookos-shell] no se pudieron listar los directorios:", error);
+    cwdByPty.delete(handle.id);
+    submit(`${line}\r`);
+    return true;
+  }
+
+  if (!match[1]) {
+    const parent = dirname(cwd);
+    const options = parent === cwd ? entries : [{ name: "..", path: parent }, ...entries];
+    openDirectoryPicker(handle, options, submit, null, cwd);
+    return true;
+  }
+
+  const rawTarget = stripCdQuotes(match[1]);
+  if (!rawTarget || rawTarget === "-" || rawTarget.startsWith("-")) {
+    submit(`${line}\r`);
+    return true;
+  }
+  const home = await homeDirectory(handle);
+  const target = rawTarget === "~"
+    ? home
+    : rawTarget.startsWith("~/")
+    ? normalizePosixPath(`${home}/${rawTarget.slice(2)}`)
+    : normalizePosixPath(rawTarget.startsWith("/") ? rawTarget : `${cwd}/${rawTarget}`);
+  if (target === "/") {
+    cwdByPty.set(handle.id, "/");
+    submit(`${line}\r`);
+    return true;
+  }
+  const parent = dirname(target);
+  const targetName = basename(target);
+  const candidates = parent === cwd ? entries : await invoke("list_directories", { path: parent }).catch(() => []);
+  const exact = candidates.find((entry) => normalizePosixPath(entry.path) === target);
+  if (exact) {
+    cwdByPty.set(handle.id, exact.path);
+    submit(`${line}\r`);
+    return true;
+  }
+
+  const foldedName = foldText(targetName);
+  let suggestion = candidates.find((entry) => foldText(entry.name) === foldedName);
+  if (!suggestion) {
+    const limit = Math.max(2, Math.floor(foldedName.length / 3));
+    suggestion = candidates
+      .map((entry) => ({ entry, distance: editDistance(foldedName, foldText(entry.name)) }))
+      .filter(({ distance }) => distance <= limit)
+      .sort((a, b) => a.distance - b.distance)[0]?.entry;
+  }
+  if (suggestion) {
+    openDirectoryPicker(handle, [suggestion], submit, suggestion, cwd);
+    return true;
+  }
+  submit(`${line}\r`);
+  return true;
+}
+
+function focusPane(delta) {
+  const tab = activeTab();
+  if (!tab || tab.terms.length < 2) return;
+  tab.focusedIndex = (tab.focusedIndex + delta + tab.terms.length) % tab.terms.length;
+  markFocusedPane(tab);
+  tab.terms[tab.focusedIndex]?.term.focus();
+}
+
+function selectRelativeTab(delta) {
+  if (state.tabs.length < 2) return;
+  const current = state.tabs.findIndex((tab) => tab.id === state.activeTab);
+  const next = (current + delta + state.tabs.length) % state.tabs.length;
+  selectTab(state.tabs[next].id);
+}
+
+paletteInput.addEventListener("input", () => {
+  paletteIndex = 0;
+  renderCommandPalette();
+});
+palette.addEventListener("click", (e) => {
+  if (e.target === palette) closeCommandPalette();
+});
+
+window.addEventListener("keydown", (e) => {
+  if (!palette.hidden) {
+    // La paleta es modal: Ctrl+T/W y el resto de atajos de la terminal no
+    // deben ejecutarse mientras el usuario está buscando.
+    e.stopImmediatePropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeCommandPalette();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      paletteIndex = Math.min(paletteIndex + 1, paletteMatches.length - 1);
+      renderCommandPalette();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      paletteIndex = Math.max(paletteIndex - 1, 0);
+      renderCommandPalette();
+    } else if (e.key === "Enter" && paletteMatches[paletteIndex]) {
+      e.preventDefault();
+      runPaletteItem(paletteMatches[paletteIndex]);
+    }
+    return;
+  }
+  if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    openCommandPalette();
+  } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    openCommandPalette();
+  } else if (e.ctrlKey && e.key === "PageDown") {
+    e.preventDefault();
+    selectRelativeTab(1);
+  } else if (e.ctrlKey && e.key === "PageUp") {
+    e.preventDefault();
+    selectRelativeTab(-1);
+  } else if (e.ctrlKey && e.altKey && ["ArrowLeft", "ArrowUp"].includes(e.key)) {
+    e.preventDefault();
+    focusPane(-1);
+  } else if (e.ctrlKey && e.altKey && ["ArrowRight", "ArrowDown"].includes(e.key)) {
+    e.preventDefault();
+    focusPane(1);
+  }
+});
 
 document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
@@ -334,13 +838,52 @@ document.addEventListener("click", (e) => {
 function closeAllMenus() {
   document.querySelectorAll(".menu.open").forEach((m) => m.classList.remove("open"));
 }
-document.querySelectorAll(".menu-trigger").forEach((trigger) => {
+function openMenu(menu) {
+  closeAllMenus();
+  menu.classList.add("open");
+}
+
+const menuTriggers = [...document.querySelectorAll(".menu-trigger")];
+function moveBetweenMenus(delta) {
+  const current = menuTriggers.findIndex((trigger) => trigger.closest(".menu")?.classList.contains("open"));
+  if (current < 0) return;
+  const next = (current + delta + menuTriggers.length) % menuTriggers.length;
+  const trigger = menuTriggers[next];
+  openMenu(trigger.closest(".menu"));
+  trigger.focus();
+}
+
+menuTriggers.forEach((trigger) => {
   trigger.addEventListener("click", (e) => {
     e.stopPropagation();
     const menu = trigger.closest(".menu");
     const wasOpen = menu.classList.contains("open");
-    closeAllMenus();
-    if (!wasOpen) menu.classList.add("open");
+    if (wasOpen) closeAllMenus();
+    else openMenu(menu);
+  });
+  // Con un menú abierto, pasar a otro título ya lo cambia automáticamente,
+  // como en los menús clásicos de KDE, GNOME y Windows.
+  trigger.addEventListener("mouseenter", () => {
+    if (document.querySelector(".menu.open") && !trigger.closest(".menu").classList.contains("open")) {
+      openMenu(trigger.closest(".menu"));
+    }
+  });
+  trigger.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      moveBetweenMenus(1);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      moveBetweenMenus(-1);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      openMenu(trigger.closest(".menu"));
+      trigger.closest(".menu").querySelector(".menu-popup button")?.focus();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeAllMenus();
+      trigger.focus();
+    }
   });
 });
 document.addEventListener("click", (e) => {
@@ -359,6 +902,7 @@ window.addEventListener("keydown", (e) => {
   else if (ctrl && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); actions["split-v"](); }
   else if (ctrl && e.shiftKey && e.key.toLowerCase() === "c") { e.preventDefault(); actions.copy(); }
   else if (ctrl && e.shiftKey && e.key.toLowerCase() === "v") { e.preventDefault(); actions.paste(); }
+  else if (ctrl && e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); actions["toggle-stats"](); }
   else if (ctrl && (e.key === "+" || e.key === "=")) { e.preventDefault(); zoom(1); }
   else if (ctrl && e.key === "-") { e.preventDefault(); zoom(-1); }
   else if (ctrl && e.key === "0") { e.preventDefault(); zoomReset(); }
@@ -367,16 +911,137 @@ window.addEventListener("keydown", (e) => {
 // =====================================================================
 //  Selectores de idioma y tema
 // =====================================================================
+const customSelects = new Map();
+
+function closeCustomSelects(except = null) {
+  for (const control of customSelects.values()) {
+    if (control !== except) closeCustomSelect(control);
+  }
+}
+
+function closeCustomSelect(control) {
+  control.wrapper.classList.remove("open");
+  control.trigger.setAttribute("aria-expanded", "false");
+}
+
+function openCustomSelect(control) {
+  closeCustomSelects(control);
+  control.wrapper.classList.add("open");
+  control.trigger.setAttribute("aria-expanded", "true");
+  control.options.querySelector(`[data-value="${CSS.escape(control.select.value)}"]`)?.focus();
+}
+
+function renderCustomSelect(control) {
+  const { select, trigger, options } = control;
+  const selected = select.options[select.selectedIndex];
+  trigger.querySelector(".select-label").textContent = selected?.textContent?.trim() || "";
+  options.innerHTML = "";
+  [...select.options].forEach((option) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "select-option";
+    item.dataset.value = option.value;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", option.value === select.value ? "true" : "false");
+    item.textContent = option.textContent.trim();
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      select.value = option.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      closeCustomSelect(control);
+      trigger.focus();
+    });
+    options.appendChild(item);
+  });
+}
+
+function enhanceSelect(select) {
+  if (select.dataset.themedSelect) return;
+  const wrapper = document.createElement("div");
+  wrapper.className = "themed-select";
+  select.parentNode.insertBefore(wrapper, select);
+  wrapper.appendChild(select);
+  select.dataset.themedSelect = "true";
+  select.tabIndex = -1;
+  select.setAttribute("aria-hidden", "true");
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "select-trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  const label = wrapper.parentElement?.querySelector(":scope > span");
+  if (label) {
+    label.id ||= `${select.id}Label`;
+    trigger.setAttribute("aria-labelledby", label.id);
+  } else {
+    trigger.setAttribute("aria-label", select.id);
+  }
+  trigger.innerHTML = '<span class="select-label"></span><svg class="select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+
+  const options = document.createElement("div");
+  options.className = "select-options";
+  options.id = `${select.id}Options`;
+  options.setAttribute("role", "listbox");
+  trigger.setAttribute("aria-controls", options.id);
+  wrapper.append(trigger, options);
+
+  const control = { select, wrapper, trigger, options };
+  customSelects.set(select.id, control);
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (wrapper.classList.contains("open")) closeCustomSelect(control);
+    else openCustomSelect(control);
+  });
+  trigger.addEventListener("keydown", (e) => {
+    if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(e.key)) {
+      e.preventDefault();
+      if (!wrapper.classList.contains("open")) openCustomSelect(control);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeCustomSelect(control);
+    }
+  });
+  options.addEventListener("keydown", (e) => {
+    const items = [...options.querySelectorAll(".select-option")];
+    const current = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      items[(current + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      items[e.key === "Home" ? 0 : items.length - 1]?.focus();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeCustomSelect(control);
+      trigger.focus();
+    } else if (e.key === "Tab") {
+      closeCustomSelect(control);
+    }
+  });
+  select.addEventListener("change", () => renderCustomSelect(control));
+  renderCustomSelect(control);
+}
+
+function refreshCustomSelects() {
+  for (const control of customSelects.values()) renderCustomSelect(control);
+}
+
+document.querySelectorAll("select").forEach(enhanceSelect);
+
 const langSel = document.getElementById("langSelect");
 langSel.value = localStorage.getItem("bookos.lang") || "es";
+refreshCustomSelects();
 langSel.addEventListener("change", () => {
   setLang(langSel.value);
+  refreshCustomSelects();
   renderProfileList();
   renderWidgets(); // re-traduce títulos de widgets
 });
 
 const themeSel = document.getElementById("themeSelect");
 themeSel.value = state.themeMode;
+refreshCustomSelects();
 themeSel.addEventListener("change", () => {
   state.themeMode = themeSel.value;
   localStorage.setItem("bookos.themeMode", state.themeMode);
@@ -386,6 +1051,22 @@ themeSel.addEventListener("change", () => {
   } else {
     applyTheme(state.themeMode);
   }
+});
+
+const caseInsensitiveToggle = document.getElementById("caseInsensitiveToggle");
+caseInsensitiveToggle.checked = state.caseInsensitiveCommands;
+caseInsensitiveToggle.addEventListener("change", () => {
+  state.caseInsensitiveCommands = caseInsensitiveToggle.checked;
+  localStorage.setItem("bookos.caseInsensitiveCommands", String(state.caseInsensitiveCommands));
+  for (const handle of termsById.values()) handle.setCaseInsensitive(state.caseInsensitiveCommands);
+});
+
+const dynamicPaletteToggle = document.getElementById("dynamicPaletteToggle");
+dynamicPaletteToggle.checked = state.dynamicPalette;
+dynamicPaletteToggle.addEventListener("change", () => {
+  state.dynamicPalette = dynamicPaletteToggle.checked;
+  localStorage.setItem("bookos.dynamicPalette", String(state.dynamicPalette));
+  window.bookosPalette?.setEnabled(state.dynamicPalette);
 });
 
 // =====================================================================
@@ -410,6 +1091,7 @@ async function populateFontSelect() {
   const fonts = await invoke("list_fonts");
   sel.innerHTML = fonts.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
   sel.dataset.loaded = "1";
+  refreshCustomSelects();
 }
 
 function renderProfileList() {
@@ -449,11 +1131,13 @@ function loadProfileIntoForm(p) {
   document.getElementById("pFontSize").value = p.fontSize;
   document.getElementById("pShell").value = p.shell || "";
   document.getElementById("pActivateOn").value = p.activateOn;
+  refreshCustomSelects();
 }
 function resetProfileForm() {
   editingId = null;
   document.getElementById("profileForm").reset();
   document.getElementById("pFontSize").value = 14;
+  refreshCustomSelects();
 }
 
 document.getElementById("profileForm").addEventListener("submit", (e) => {
@@ -722,7 +1406,10 @@ listen("pty://exit", (e) => {
     const idx = tab.terms.findIndex((h) => h.id === e.payload);
     if (idx >= 0) {
       const h = tab.terms[idx];
+      if (directoryPending?.handle === h) closeDirectoryPicker();
       termsById.delete(h.id);
+      cwdByPty.delete(h.id);
+      homeByPty.delete(h.id);
       h.dispose();
       tab.terms.splice(idx, 1);
       h.paneEl.remove();
@@ -763,6 +1450,8 @@ async function boot() {
       applyTheme("light");
     }
   }
+  document.getElementById("syspanel").classList.toggle("hidden", state.statsHidden);
+  syncStatsToggle();
 
   renderProfilesMenu();
   renderWidgets();
