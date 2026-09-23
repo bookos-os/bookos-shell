@@ -84,6 +84,7 @@ export function createTerminal(container, {
     if (e.ctrlKey && ["+", "=", "-", "0"].includes(e.key)) return false;
     if (e.ctrlKey && e.altKey && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return false;
     if (e.ctrlKey && ["PageUp", "PageDown"].includes(e.key)) return false;
+    if (e.ctrlKey && e.key === "Tab") return false;
     return true;
   });
 

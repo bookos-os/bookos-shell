@@ -105,14 +105,11 @@ async fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
 
-/// Devuelve el directorio de trabajo con el que se crean los PTY.
-/// No debe confundirse con HOME: `cd` sin argumentos necesita mostrar las
-/// carpetas del lugar en el que está la terminal al abrirse.
+/// Devuelve el directorio inicial de los PTY. Las terminales nuevas empiezan
+/// en HOME, independientemente de desde qué carpeta se lanzó BookOS Shell.
 #[tauri::command]
 async fn initial_cwd() -> String {
-    std::env::current_dir()
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "/".to_string())
+    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
 
 /// Tema actual del escritorio ("light" | "dark"), leído al arrancar.

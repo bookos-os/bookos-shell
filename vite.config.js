@@ -7,6 +7,9 @@ export default defineConfig({
   publicDir: "../public",
   clearScreen: false,
   server: {
+    // En algunos entornos Linux, "localhost" resuelve a ::1 y WebView/Vite
+    // no puede abrir el socket IPv6. Fuerza IPv4 para que Tauri arranque.
+    host: "127.0.0.1",
     port: 5181,
     strictPort: true,
     watch: { ignore: ["**/src-tauri/**"] },

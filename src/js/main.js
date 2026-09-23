@@ -805,6 +805,11 @@ window.addEventListener("keydown", (e) => {
   } else if (e.ctrlKey && e.key === "PageUp") {
     e.preventDefault();
     selectRelativeTab(-1);
+  } else if (e.ctrlKey && e.key === "Tab") {
+    // Igual que en otros editores: Ctrl+Tab vuelve a la pestaña siguiente;
+    // con Shift recorre las pestañas en sentido contrario.
+    e.preventDefault();
+    selectRelativeTab(e.shiftKey ? -1 : 1);
   } else if (e.ctrlKey && e.altKey && ["ArrowLeft", "ArrowUp"].includes(e.key)) {
     e.preventDefault();
     focusPane(-1);

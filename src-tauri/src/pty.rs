@@ -120,9 +120,12 @@ impl PtyManager {
         let mut cmd = CommandBuilder::new(&shell);
         // Login + interactiva para que se carguen perfiles del usuario.
         cmd.arg("-l");
-        if let Some(dir) = cwd {
-            cmd.cwd(dir);
-        }
+        // No heredamos el directorio desde el que se lanzó la aplicación:
+        // una terminal nueva debe comenzar siempre en HOME.
+        let start_dir = cwd
+            .or_else(|| std::env::var("HOME").ok())
+            .unwrap_or_else(|| "/".to_string());
+        cmd.cwd(start_dir);
         // Pista para programas: terminal con color real.
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
