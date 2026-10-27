@@ -60,9 +60,28 @@ export function createTerminal(container, {
   onTitle,
   onCommandLine,
   caseInsensitiveCommands = true,
+  cwd = null,
 } = {}) {
   const id = `pty-${Date.now()}-${counter++}`;
+  // window.open abre dentro del WebView; ambos tipos de enlace deben salir
+  // por el abridor del sistema para llegar al navegador predeterminado.
+  const enlaces = {
+    activate(evento, url) {
+      if (!evento.ctrlKey) return;
+      evento.preventDefault();
+      invoke("plugin:opener|open_url", { url }).catch((error) =>
+        console.error("[bookos-shell] no se pudo abrir el enlace:", error)
+      );
+    },
+    hover(_evento, url) {
+      container.title = url;
+    },
+    leave() {
+      container.removeAttribute("title");
+    },
+  };
   const term = new Terminal({
+    linkHandler: enlaces,
     fontFamily: `${profile?.font || "Hack"}, "SF Mono", monospace`,
     fontSize: profile?.fontSize || 14,
     cursorBlink: true,
@@ -79,6 +98,29 @@ export function createTerminal(container, {
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
     const k = e.key.toLowerCase();
+    // xterm envía Ctrl+Backspace como ^H y Alt+Backspace como ESC DEL;
+    // intercambiamos esas secuencias para que Ctrl borre la palabra.
+    if (!e.shiftKey && !e.metaKey && e.key === "Backspace" && e.ctrlKey !== e.altKey) {
+      e.preventDefault();
+      onInput(e.ctrlKey ? "\x1b\x7f" : "\x7f");
+      return false;
+    }
+    // xterm manda CSI 3;5~ para Ctrl+Supr y readline no lo tiene enlazado.
+    // ESC d (kill-word) sí lo está en bash/zsh; pasa por onInput para que el
+    // seguimiento de línea lo marque como no fiable (empieza por ESC).
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "Delete") {
+      e.preventDefault();
+      onInput("\x1bd");
+      return false;
+    }
+    // El ^L de readline solo manda ED 2, que en xterm.js limpia la pantalla
+    // pero deja el scrollback. Lo vaciamos aquí y dejamos pasar el ^L para que
+    // la shell redibuje el prompt entero (los de dos líneas incluidos). En el
+    // buffer alternativo (vim, less, htop) ^L es "redibujar" y no se toca.
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && k === "l" && term.buffer.active.type === "normal") {
+      term.clear();
+      return true;
+    }
     if (e.ctrlKey && !e.shiftKey && ["t", "n", "w", "k"].includes(k)) return false;
     if (e.ctrlKey && e.shiftKey && ["d", "e", "c", "v", "p", "s"].includes(k)) return false;
     if (e.ctrlKey && ["+", "=", "-", "0"].includes(e.key)) return false;
@@ -90,7 +132,7 @@ export function createTerminal(container, {
 
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon());
+  term.loadAddon(new WebLinksAddon(enlaces.activate, enlaces));
   term.open(container);
   fit.fit();
 
@@ -113,7 +155,7 @@ export function createTerminal(container, {
     cols: term.cols,
     rows: term.rows,
     shell: profile?.shell || null,
-    cwd: null,
+    cwd,
   }).catch((e) => {
     term.write(`\x1b[31m[bookos-shell] no se pudo iniciar la shell: ${e}\x1b[0m\r\n`);
   });
@@ -156,6 +198,8 @@ export function createTerminal(container, {
         inputTrackable = true;
       } else if (char === "\x7f" || char === "\b") {
         inputLine = inputLine.slice(0, -1);
+      } else if (char === "\x0c") {
+        // ^L redibuja la pantalla sin tocar la línea ni el cursor.
       } else if (char === "\x1b") {
         inputTrackable = false;
       } else if (char < " ") {
@@ -168,23 +212,54 @@ export function createTerminal(container, {
     }
   }
 
-  // Teclas -> PTY.
-  term.onData((data) => {
+  // Teclas retenidas mientras el backend dice quién está en primer plano;
+  // se reenvían en orden después del Enter.
+  let held = null;
+
+  function submitLine(atPrompt) {
+    if (atPrompt && onCommandLine?.(inputLine, writeToPty)) {
+      // El selector toma el control de una línea `cd`; quitamos el texto que
+      // readline ya ha mostrado mientras esperamos la elección del usuario.
+      trackInput("\r");
+      writeToPty("\x15");
+      return;
+    }
+    const outgoing = atPrompt ? commandAwareData("\r") : "\r";
+    trackInput("\r");
+    writeToPty(outgoing);
+  }
+
+  function onInput(data) {
     if (inputModeHandler) {
       inputModeHandler(data);
       return;
     }
-    if (data === "\r" && inputTrackable && onCommandLine?.(inputLine, writeToPty)) {
-      // El selector toma el control de una línea `cd`; quitamos el texto que
-      // readline ya ha mostrado mientras esperamos la elección del usuario.
-      trackInput(data);
-      writeToPty("\x15");
+    if (held) {
+      held.push(data);
       return;
     }
-    const outgoing = commandAwareData(data);
+    if (data === "\r" && inputTrackable && inputLine.trim()) {
+      // Las ayudas de línea solo valen para la shell. Si delante está ssh,
+      // sudo o un editor, la línea es una contraseña o texto del programa:
+      // pasarla a minúsculas rompía la contraseña y `cd` en el remoto abría
+      // el selector con carpetas locales.
+      held = [];
+      invoke("pty_at_prompt", { id })
+        .catch(() => false)
+        .then((atPrompt) => {
+          submitLine(atPrompt);
+          const rest = held;
+          held = null;
+          rest.forEach(onInput);
+        });
+      return;
+    }
     trackInput(data);
-    writeToPty(outgoing);
-  });
+    writeToPty(data);
+  }
+
+  // Teclas -> PTY.
+  term.onData(onInput);
 
   // Título dinámico (secuencias OSC del shell).
   term.onTitleChange((title) => onTitle?.(title));

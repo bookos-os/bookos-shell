@@ -9,7 +9,9 @@ mod stats;
 mod theme;
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 use tauri::{AppHandle, State, WebviewUrl, WebviewWindowBuilder};
 
 /// Contador para títulos/ids de ventanas nuevas.
@@ -52,6 +54,16 @@ async fn pty_resize(
     rows: u16,
 ) -> Result<(), String> {
     mgr.resize(&id, cols, rows)
+}
+
+#[tauri::command]
+async fn pty_at_prompt(mgr: State<'_, pty::PtyManager>, id: String) -> Result<bool, String> {
+    mgr.at_prompt(&id)
+}
+
+#[tauri::command]
+async fn pty_cwd(mgr: State<'_, pty::PtyManager>, id: String) -> Result<String, String> {
+    mgr.cwd(&id)
 }
 
 #[tauri::command]
@@ -105,11 +117,23 @@ async fn home_dir() -> String {
     std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
 }
 
-/// Devuelve el directorio inicial de los PTY. Las terminales nuevas empiezan
-/// en HOME, independientemente de desde qué carpeta se lanzó BookOS Shell.
+/// Carpeta en la que debe arrancar la primera terminal de cada ventana, por
+/// etiqueta. La deja `new_window` y la recoge la ventana nueva al arrancar.
+#[derive(Default)]
+struct PendingCwd(Mutex<HashMap<String, String>>);
+
+/// Directorio inicial de la primera terminal de esta ventana: la carpeta de la
+/// terminal desde la que se abrió, o HOME (nunca la carpeta desde la que se
+/// lanzó BookOS Shell).
 #[tauri::command]
-async fn initial_cwd() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+async fn initial_cwd(window: tauri::WebviewWindow, pending: State<'_, PendingCwd>) -> Result<String, String> {
+    Ok(pending
+        .0
+        .lock()
+        .unwrap()
+        .remove(window.label())
+        .or_else(|| std::env::var("HOME").ok())
+        .unwrap_or_else(|| "/".to_string()))
 }
 
 /// Tema actual del escritorio ("light" | "dark"), leído al arrancar.
@@ -136,9 +160,16 @@ fn open_path(app: AppHandle, path: String) -> Result<(), String> {
 
 /// Abre una nueva ventana de terminal independiente (como en Notepad).
 #[tauri::command]
-async fn new_window(app: AppHandle) -> Result<(), String> {
+async fn new_window(
+    app: AppHandle,
+    pending: State<'_, PendingCwd>,
+    cwd: Option<String>,
+) -> Result<(), String> {
     let n = WINDOW_SEQ.fetch_add(1, Ordering::SeqCst);
     let label = format!("term-{n}");
+    if let Some(cwd) = cwd {
+        pending.0.lock().unwrap().insert(label.clone(), cwd);
+    }
     WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
         .title("BookOS Shell")
         .inner_size(1280.0, 800.0)
@@ -191,6 +222,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(pty::PtyManager::new())
+        .manage(PendingCwd::default())
         .setup(|app| {
             // Arranca el listener de tema del escritorio.
             theme::spawn_listener(app.handle().clone());
@@ -202,6 +234,8 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_kill,
+            pty_at_prompt,
+            pty_cwd,
             get_stats,
             list_fonts,
             list_directories,

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Shell - Terminal
+Name=Terminal
 Comment=Terminal nativa para BookOS
 Exec=bookos-shell
 Icon=bookos-shell

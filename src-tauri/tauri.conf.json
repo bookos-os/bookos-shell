@@ -42,11 +42,12 @@
     "shortDescription": "Terminal nativa para BookOS",
     "linux": {
       "deb": {
-        "depends": [],
+        "depends": ["sudo"],
         "postInstallScript": "scripts/postinstall.sh",
         "desktopTemplate": "linux/desktop.hbs"
       },
       "rpm": {
+        "depends": ["sudo"],
         "postInstallScript": "scripts/postinstall.sh",
         "desktopTemplate": "linux/desktop.hbs"
       }

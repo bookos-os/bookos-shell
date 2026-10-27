@@ -22,6 +22,7 @@ export const dict = {
     "action.zoomReset": "Tamaño normal",
     "action.toggleStats": "Panel de sistema",
     "action.hideStats": "Ocultar panel de sistema",
+    "action.showMenus": "Menú",
     "action.showStats": "Mostrar panel de sistema",
     "action.manageProfiles": "Gestionar perfiles…",
 
@@ -32,6 +33,7 @@ export const dict = {
     "settings.themeDark": "Oscuro",
     "settings.caseInsensitive": "Permitir comandos con mayúsculas",
     "settings.dynamicPalette": "Usar colores dinámicos de BookOS Settings",
+    "settings.restoreSession": "Recordar pestañas al abrir",
 
     "palette.title": "Paleta de comandos",
     "palette.open": "Comandos",
@@ -123,6 +125,7 @@ export const dict = {
     "action.zoomReset": "Actual size",
     "action.toggleStats": "System panel",
     "action.hideStats": "Hide system panel",
+    "action.showMenus": "Menu",
     "action.showStats": "Show system panel",
     "action.manageProfiles": "Manage profiles…",
 
@@ -133,6 +136,7 @@ export const dict = {
     "settings.themeDark": "Dark",
     "settings.caseInsensitive": "Allow uppercase commands",
     "settings.dynamicPalette": "Use dynamic BookOS Settings colors",
+    "settings.restoreSession": "Remember tabs on launch",
 
     "palette.title": "Command palette",
     "palette.open": "Commands",

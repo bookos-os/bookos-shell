@@ -89,7 +89,10 @@ const state = {
   fontSize: 14,
   caseInsensitiveCommands: localStorage.getItem("bookos.caseInsensitiveCommands") !== "false",
   dynamicPalette: localStorage.getItem("bookos.dynamicPalette") !== "false",
-  statsHidden: localStorage.getItem("bookos.statsHidden") === "true",
+  restoreSession: localStorage.getItem("bookos.restoreSession") === "true",
+  // Oculto salvo que el usuario lo haya abierto: la ventana arranca solo con
+  // la terminal.
+  statsHidden: localStorage.getItem("bookos.statsHidden") !== "false",
 };
 
 // Mapa id-de-pty -> handle de terminal, para enrutar datos del backend.
@@ -136,7 +139,7 @@ window.addEventListener("bookos-palette-changed", () => {
 const panesEl = document.getElementById("panes");
 const tabsEl = document.getElementById("tabs");
 
-function createTab(profile = null) {
+function createTab(profile = null, cwd = null) {
   createTab._seq = createTab._seq || 0;
   const view = document.createElement("div");
   view.className = "tabview";
@@ -153,22 +156,15 @@ function createTab(profile = null) {
   state.tabs.push(tab);
 
   // Primer panel.
-  addPaneToTab(tab, profile);
+  addPaneToTab(tab, profile, cwd);
   selectTab(tab.id);
   renderTabs();
   return tab;
 }
 
-function addPaneToTab(tab, profile = null) {
+function addPaneToTab(tab, profile = null, cwd = null) {
   const pane = document.createElement("div");
   pane.className = "pane";
-  pane.innerHTML = `
-    <div class="pane-toolbar">
-      <span class="tty-badge"><i></i> TTY</span>
-      <button class="pane-command-button" data-action="open-palette" data-i18n-title="palette.openTitle" title="${escapeHtml(t("palette.openTitle"))}">
-        <span data-i18n="palette.open">${escapeHtml(t("palette.open"))}</span><kbd>Ctrl K</kbd>
-      </button>
-    </div>`;
   tab.viewEl.appendChild(pane);
 
   let handle;
@@ -176,14 +172,19 @@ function addPaneToTab(tab, profile = null) {
     theme: state.theme,
     profile,
     caseInsensitiveCommands: state.caseInsensitiveCommands,
+    cwd,
     onCommandLine: (line, submit) => {
       if (!isAssistableCdLine(line)) return false;
       assistCdCommand(handle, line, submit);
       return true;
     },
     onTitle: (title) => {
-      tab.title = title || tab.title;
-      renderTabs();
+      if (!title || title === tab.title) return;
+      tab.title = title;
+      // codex anima un spinner en el título cada ~100 ms (medido). Rehacer
+      // la cinta entera en cada fotograma hacía parpadear las pestañas: los
+      // nodos nuevos pierden :hover hasta el siguiente movimiento del ratón.
+      tab.nameEl.textContent = title;
     },
   });
   handle.setFontSize(state.fontSize);
@@ -207,12 +208,15 @@ function markFocusedPane(tab) {
   );
 }
 
-function splitActive(direction) {
+async function splitActive(direction) {
+  const cwd = await focusedCwd();
+  // Comprobado después del await: dos Ctrl+Shift+D seguidos no deben colar
+  // un tercer panel mientras se resuelve la carpeta.
   const tab = activeTab();
   if (!tab || tab.terms.length >= 2) return; // dejamos máximo 2 paneles por simplicidad
   tab.split = direction;
   tab.viewEl.classList.toggle("split-vertical", direction === "vertical");
-  addPaneToTab(tab);
+  addPaneToTab(tab, null, cwd);
   refitTab(tab);
 }
 
@@ -220,8 +224,22 @@ function refitTab(tab) {
   requestAnimationFrame(() => tab.terms.forEach((h) => h.refit()));
 }
 
+// Contador y no Date.now(): dos selecciones en el mismo milisegundo (cerrar
+// una pestaña y activar la de al lado) empatarían y el orden sería arbitrario.
+let tabUseCounter = 0;
+// Ctrl+Tab funciona como Alt+Tab: una pulsación alterna entre las dos últimas
+// pestañas usadas y, con Ctrl mantenido, cada Tab retrocede una más.
+let tabCycle = null; // { order: [id], index } mientras Ctrl está pulsado
+
 function selectTab(id) {
   state.activeTab = id;
+  // Mientras Ctrl sigue pulsado en un recorrido Ctrl+Tab, las pestañas por las
+  // que se pasa no cuentan como usadas; si contaran, el orden cambiaría a mitad
+  // del recorrido y no se podría llegar más allá de la segunda.
+  if (!tabCycle) {
+    const tab = state.tabs.find((t) => t.id === id);
+    if (tab) tab.usedAt = ++tabUseCounter;
+  }
   state.tabs.forEach((tb) => tb.viewEl.classList.toggle("active", tb.id === id));
   renderTabs();
   const tab = activeTab();
@@ -238,6 +256,7 @@ function activeTab() {
 function closeTab(id) {
   const idx = state.tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
+  endTabCycle();
   const tab = state.tabs[idx];
   if (directoryPending && tab.terms.includes(directoryPending.handle)) closeDirectoryPicker();
   tab.terms.forEach((h) => {
@@ -266,7 +285,11 @@ function renderTabs() {
     el.innerHTML =
       `<span class="tab-name">${escapeHtml(tab.title)}</span>` +
       `<button class="tab-close" title="Cerrar pestaña"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>`;
-    el.onclick = () => selectTab(tab.id);
+    tab.nameEl = el.querySelector(".tab-name");
+    el.onclick = () => {
+      if (!el.classList.contains("dragging")) selectTab(tab.id);
+    };
+    el.onpointerdown = (e) => startTabDrag(e, tab, el);
     el.querySelector(".tab-close").onclick = (e) => {
       e.stopPropagation();
       closeTab(tab.id);
@@ -281,9 +304,93 @@ function renderTabs() {
     add.className = "tab-add";
     add.title = "Nueva pestaña";
     add.textContent = "+";
-    add.onclick = () => createTab();
+    add.onclick = () => actions["new-tab"]();
     tabsEl.appendChild(add);
   }
+}
+
+const TAB_MOVE_EASING = { duration: 120, easing: "cubic-bezier(.4,0,.2,1)" };
+
+// Con eventos de puntero y no con HTML5 drag & drop: Tauri intercepta el
+// arrastre nativo (ver onDragDropEvent) y el `drop` no llegaría al DOM.
+// Como en los navegadores, la pestaña sigue al ratón y las vecinas se apartan
+// en cuanto se cruza su mitad; state.tabs y el DOM se reordenan a la vez.
+function startTabDrag(e, tab, el) {
+  if (e.button !== 0 || e.target.closest(".tab-close")) return;
+  const startX = e.clientX;
+  const startLeft = el.offsetLeft;
+  let dragging = false;
+  let shift = 0;
+
+  const onMove = (ev) => {
+    const dx = ev.clientX - startX;
+    if (!dragging) {
+      // Umbral para que un clic con temblor de mano no se convierta en arrastre.
+      if (Math.abs(dx) < 4) return;
+      dragging = true;
+      el.setPointerCapture(ev.pointerId);
+      el.classList.add("dragging");
+    }
+    const tabEls = [...tabsEl.querySelectorAll(".tab")];
+    const first = tabEls[0];
+    const last = tabEls[tabEls.length - 1];
+    const left = Math.min(
+      Math.max(startLeft + dx, first.offsetLeft),
+      last.offsetLeft + last.offsetWidth - el.offsetWidth,
+    );
+    for (;;) {
+      const prev = el.previousElementSibling;
+      const next = el.nextElementSibling;
+      if (prev?.classList.contains("tab") && left < prev.offsetLeft + prev.offsetWidth / 2) {
+        moveTabEl(prev, () => tabsEl.insertBefore(el, prev));
+        moveTabInState(tab, -1);
+      } else if (next?.classList.contains("tab") && left + el.offsetWidth > next.offsetLeft + next.offsetWidth / 2) {
+        moveTabEl(next, () => tabsEl.insertBefore(next, el));
+        moveTabInState(tab, 1);
+      } else break;
+    }
+    shift = left - el.offsetLeft;
+    el.style.transform = `translateX(${shift}px)`;
+  };
+
+  const onUp = () => {
+    el.removeEventListener("pointermove", onMove);
+    el.removeEventListener("pointerup", onUp);
+    el.removeEventListener("pointercancel", onUp);
+    if (!dragging) return;
+    // El `click` que sigue al pointerup aún ve la clase y no selecciona; la
+    // selección va después para que renderTabs no tire el nodo a mitad de evento.
+    setTimeout(() => {
+      selectTab(tab.id);
+      const placed = tabsEl.children[state.tabs.indexOf(tab)];
+      placed.animate([{ transform: `translateX(${shift}px)` }, { transform: "none" }], TAB_MOVE_EASING);
+    });
+  };
+
+  el.addEventListener("pointermove", onMove);
+  el.addEventListener("pointerup", onUp);
+  el.addEventListener("pointercancel", onUp);
+}
+
+// FLIP: se mide antes y después del cambio en el DOM y se anima la diferencia.
+function moveTabEl(el, mutate) {
+  const before = el.offsetLeft;
+  mutate();
+  el.animate([{ transform: `translateX(${before - el.offsetLeft}px)` }, { transform: "none" }], TAB_MOVE_EASING);
+}
+
+function moveTabInState(tab, delta) {
+  const idx = state.tabs.indexOf(tab);
+  state.tabs.splice(idx, 1);
+  state.tabs.splice(idx + delta, 0, tab);
+}
+
+function moveActiveTab(delta) {
+  const tab = activeTab();
+  const idx = state.tabs.indexOf(tab);
+  if (!tab || idx + delta < 0 || idx + delta >= state.tabs.length) return;
+  moveTabInState(tab, delta);
+  renderTabs();
 }
 
 function escapeHtml(s) {
@@ -310,6 +417,18 @@ function focusedHandle() {
   return tab?.terms[tab.focusedIndex];
 }
 
+// Carpeta en la que está ahora la terminal con foco: las pestañas, ventanas y
+// divisiones nuevas arrancan ahí en vez de en HOME.
+async function focusedCwd() {
+  const h = focusedHandle();
+  if (!h) return null;
+  try {
+    return await invoke("pty_cwd", { id: h.id });
+  } catch {
+    return null;
+  }
+}
+
 function syncStatsToggle() {
   const button = document.getElementById("statsToggle");
   if (!button) return;
@@ -321,8 +440,8 @@ function syncStatsToggle() {
 }
 
 const actions = {
-  "new-tab": () => createTab(),
-  "new-window": () => invoke("new_window"),
+  "new-tab": async () => createTab(null, await focusedCwd()),
+  "new-window": async () => invoke("new_window", { cwd: await focusedCwd() }),
   "split-h": () => splitActive("horizontal"),
   "split-v": () => splitActive("vertical"),
   "close-tab": () => closeTab(state.activeTab),
@@ -368,6 +487,10 @@ const actions = {
     };
     requestAnimationFrame(tick);
   },
+  "toggle-menus": () => {
+    const shown = document.querySelector(".titlebar").classList.toggle("menus-shown");
+    document.getElementById("menusToggle").setAttribute("aria-pressed", String(shown));
+  },
   "manage-profiles": () => openProfileModal(),
   "close-modal": () => closeProfileModal(),
   "reset-form": () => resetProfileForm(),
@@ -391,7 +514,8 @@ const paletteItems = [
   { id: "split-h", kind: "action", icon: "═", labelKey: "action.splitH", shortcut: "Ctrl Shift D" },
   { id: "split-v", kind: "action", icon: "║", labelKey: "action.splitV", shortcut: "Ctrl Shift E" },
   { id: "toggle-stats", kind: "action", icon: "▦", labelKey: "action.toggleStats", shortcut: "" },
-  { id: "clear", kind: "action", icon: "⌫", labelKey: "action.clear", shortcut: "" },
+  { id: "manage-profiles", kind: "action", icon: "◐", labelKey: "action.manageProfiles", shortcut: "" },
+  { id: "clear", kind: "action", icon: "⌫", labelKey: "action.clear", shortcut: "Ctrl L" },
   { id: "zoom-in", kind: "action", icon: "A+", labelKey: "action.zoomIn", shortcut: "Ctrl +" },
   { id: "zoom-out", kind: "action", icon: "A−", labelKey: "action.zoomOut", shortcut: "Ctrl −" },
   { id: "pwd", kind: "command", icon: "⌂", labelKey: "palette.pwd", command: "pwd" },
@@ -527,16 +651,14 @@ function editDistance(a, b) {
 }
 
 async function knownCwd(handle) {
-  if (cwdByPty.has(handle.id)) return cwdByPty.get(handle.id);
+  // La del kernel manda: sigue los `cd` que no pasan por el selector.
   try {
-    const cwd = await invoke("initial_cwd");
-    cwdByPty.set(handle.id, cwd);
-    return cwd;
-  } catch {
-    const home = await homeDirectory(handle);
-    cwdByPty.set(handle.id, home);
-    return home;
-  }
+    return await invoke("pty_cwd", { id: handle.id });
+  } catch {}
+  if (cwdByPty.has(handle.id)) return cwdByPty.get(handle.id);
+  const home = await homeDirectory(handle);
+  cwdByPty.set(handle.id, home);
+  return home;
 }
 
 async function homeDirectory(handle) {
@@ -756,6 +878,30 @@ function focusPane(delta) {
   tab.terms[tab.focusedIndex]?.term.focus();
 }
 
+function cycleRecentTab(delta) {
+  if (state.tabs.length < 2) return;
+  if (!tabCycle) {
+    const order = [...state.tabs].sort((a, b) => (b.usedAt ?? 0) - (a.usedAt ?? 0)).map((t) => t.id);
+    tabCycle = { order, index: 0 };
+  }
+  const { order } = tabCycle;
+  tabCycle.index = (tabCycle.index + delta + order.length) % order.length;
+  selectTab(order[tabCycle.index]);
+}
+
+function endTabCycle() {
+  if (!tabCycle) return;
+  tabCycle = null;
+  const tab = activeTab();
+  if (tab) tab.usedAt = ++tabUseCounter;
+}
+
+window.addEventListener("keyup", (e) => {
+  if (e.key === "Control") endTabCycle();
+});
+// Si se suelta Ctrl con la ventana sin foco no llega el keyup.
+window.addEventListener("blur", endTabCycle);
+
 function selectRelativeTab(delta) {
   if (state.tabs.length < 2) return;
   const current = state.tabs.findIndex((tab) => tab.id === state.activeTab);
@@ -799,6 +945,12 @@ window.addEventListener("keydown", (e) => {
   } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "p") {
     e.preventDefault();
     openCommandPalette();
+  } else if (e.ctrlKey && e.shiftKey && e.key === "PageDown") {
+    e.preventDefault();
+    moveActiveTab(1);
+  } else if (e.ctrlKey && e.shiftKey && e.key === "PageUp") {
+    e.preventDefault();
+    moveActiveTab(-1);
   } else if (e.ctrlKey && e.key === "PageDown") {
     e.preventDefault();
     selectRelativeTab(1);
@@ -806,10 +958,8 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     selectRelativeTab(-1);
   } else if (e.ctrlKey && e.key === "Tab") {
-    // Igual que en otros editores: Ctrl+Tab vuelve a la pestaña siguiente;
-    // con Shift recorre las pestañas en sentido contrario.
     e.preventDefault();
-    selectRelativeTab(e.shiftKey ? -1 : 1);
+    cycleRecentTab(e.shiftKey ? -1 : 1);
   } else if (e.ctrlKey && e.altKey && ["ArrowLeft", "ArrowUp"].includes(e.key)) {
     e.preventDefault();
     focusPane(-1);
@@ -831,7 +981,7 @@ document.addEventListener("click", (e) => {
   // Botones de ventana.
   const winBtn = e.target.closest("[data-win]");
   if (winBtn) {
-    if (winBtn.dataset.win === "close") win.close();
+    if (winBtn.dataset.win === "close") saveSession().finally(() => win.close());
     if (winBtn.dataset.win === "min") win.minimize();
     if (winBtn.dataset.win === "max") win.toggleMaximize();
   }
@@ -1073,6 +1223,53 @@ dynamicPaletteToggle.addEventListener("change", () => {
   localStorage.setItem("bookos.dynamicPalette", String(state.dynamicPalette));
   window.bookosPalette?.setEnabled(state.dynamicPalette);
 });
+
+const restoreSessionToggle = document.getElementById("restoreSessionToggle");
+restoreSessionToggle.checked = state.restoreSession;
+restoreSessionToggle.addEventListener("change", () => {
+  state.restoreSession = restoreSessionToggle.checked;
+  localStorage.setItem("bookos.restoreSession", String(state.restoreSession));
+  if (!state.restoreSession) localStorage.removeItem(SESSION_KEY);
+});
+
+// =====================================================================
+//  Sesión: pestañas y carpetas de la última vez
+// =====================================================================
+// Solo la ventana principal guarda y restaura. Las de Ctrl+N son de paso:
+// si también escribieran, la última en cerrarse pisaría la sesión buena.
+const SESSION_KEY = "bookos.session";
+const ownsSession = win.label === "main";
+
+// El shell no avisa cuando hace `cd`, así que la carpeta se lee de /proc en
+// cada guardado. Se guarda cada pocos segundos y no solo al cerrar porque la
+// sesión del escritorio puede matar la ventana sin pasar por el botón.
+async function saveSession() {
+  if (!state.restoreSession || !ownsSession) return;
+  const tabs = await Promise.all(state.tabs.map(async (tab) => ({
+    split: tab.split,
+    cwds: await Promise.all(tab.terms.map((h) =>
+      invoke("pty_cwd", { id: h.id }).catch(() => cwdByPty.get(h.id) ?? null))),
+  })));
+  const active = state.tabs.findIndex((t) => t.id === state.activeTab);
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ tabs, active }));
+}
+
+function restoreSession() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { return false; }
+  if (!saved?.tabs?.length) return false;
+  const created = saved.tabs.map(({ split, cwds }) => {
+    const tab = createTab(null, cwds[0]);
+    if (cwds.length > 1) {
+      tab.split = split;
+      tab.viewEl.classList.toggle("split-vertical", split === "vertical");
+      addPaneToTab(tab, null, cwds[1]);
+    }
+    return tab;
+  });
+  selectTab((created[saved.active] ?? created[created.length - 1]).id);
+  return true;
+}
 
 // =====================================================================
 //  Perfiles (modal)
@@ -1441,6 +1638,27 @@ listen("theme://changed", (e) => {
 // =====================================================================
 //  Arranque
 // =====================================================================
+// =====================================================================
+//  Soltar archivos sobre la terminal
+// =====================================================================
+// Tauri intercepta el arrastre nativo (dragDropEnabled, activo por defecto) y
+// el DOM nunca recibe el `drop` con los archivos: las rutas llegan por este
+// evento. Se escriben entrecomilladas en el panel donde se soltaron, como
+// hacen Konsole y GNOME Terminal, sin Enter.
+win.onDragDropEvent(({ payload }) => {
+  if (payload.type !== "drop" || !payload.paths.length) return;
+  // Aunque el tipo diga «física», en Linux wry pasa las coordenadas de GTK
+  // sin escalar (webkitgtk/drag_drop.rs), que ya son píxeles CSS: dividir
+  // por devicePixelRatio apuntaría a otro panel con escalado 2x.
+  const { x, y } = payload.position;
+  const pane = document.elementFromPoint(x, y)?.closest(".pane");
+  const tab = activeTab();
+  const handle = tab?.terms.find((h) => h.paneEl === pane) ?? focusedHandle();
+  if (!handle) return;
+  invoke("pty_write", { id: handle.id, data: `${payload.paths.map(shellQuote).join(" ")} ` });
+  handle.term.focus();
+}).catch((e) => console.error("[bookos-shell] sin arrastrar y soltar:", e));
+
 async function boot() {
   setLang(langSel.value);
   applyI18n();
@@ -1460,7 +1678,10 @@ async function boot() {
 
   renderProfilesMenu();
   renderWidgets();
-  createTab();
+  // Una ventana abierta con Ctrl+N empieza donde estaba la terminal de origen.
+  const initialCwd = await invoke("initial_cwd").catch(() => null);
+  if (!(state.restoreSession && ownsSession && restoreSession())) createTab(null, initialCwd);
+  setInterval(saveSession, 5000);
   refreshStats();
   setInterval(refreshStats, 2000);
 

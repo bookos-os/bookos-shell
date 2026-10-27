@@ -35,6 +35,17 @@ html[data-theme="light"] {
   --selection: rgba(0, 122, 255, 0.25);
 }
 
+/* En oscuro los fondos se quedan negros aunque haya color dinámico: la
+   paleta de Settings tiñe --bg de morado/azul (#141219) y la terminal debe
+   verse negra. Más específico que los alias de bookos-palette.js para
+   ganarles; el acento y el texto siguen siendo dinámicos. */
+html.dark-mode[data-theme="dark"] {
+  --bg-window: #000000;
+  --bg-term: #000000;
+  --bg-elevated: #1c1c1e;
+  --bg-alt: #0d0d0f;
+}
+
 /* ---- Tema OSCURO (BookOS Dark) ---- */
 html[data-theme="dark"] {
   /* Idem en oscuro: el desplegable nativo y los spinners salen oscuros. */
@@ -157,34 +168,6 @@ body {
   color: var(--accent);
   outline: none;
 }
-.palette-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
-  color: var(--fg-dim);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-.palette-button:hover,
-.palette-button:focus-visible {
-  background: var(--bg-elevated);
-  border-color: var(--accent);
-  color: var(--fg);
-  outline: none;
-}
-.palette-button kbd {
-  padding-left: 4px;
-  border-left: 1px solid var(--border);
-  font-size: 10px;
-}
 .palette-magnifier {
   font-family: Georgia, serif;
   font-size: 19px;
@@ -233,9 +216,14 @@ body {
 
 /* ===================== Menú ===================== */
 .menubar {
-  display: flex;
+  display: none;
   gap: 2px;
   -webkit-app-region: no-drag;
+}
+/* El menú se usa poco (ajustes, perfiles): queda tras un botón para que la
+   barra de título solo muestre pestañas y controles de ventana. */
+.titlebar.menus-shown .menubar {
+  display: flex;
 }
 .menu {
   position: relative;
@@ -300,10 +288,10 @@ body {
 }
 .menu-popup button:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 .menu-popup button:hover kbd {
-  color: rgba(255, 255, 255, 0.85);
+  color: color-mix(in srgb, var(--on-accent, #fff) 85%, transparent);
 }
 .menu-popup hr {
   border: none;
@@ -529,6 +517,12 @@ kbd {
   color: var(--fg);
   box-shadow: 0 -2px 0 var(--accent) inset;
 }
+.tab.dragging {
+  z-index: 1;
+  opacity: 1;
+  background: var(--bg-elevated);
+  cursor: grabbing;
+}
 .tab .tab-name {
   flex: 1;
   min-width: 0;
@@ -618,67 +612,8 @@ kbd {
   border-color: var(--accent);
 }
 .pane .xterm {
-  padding: 34px 8px 8px;
+  padding: 8px;
   height: 100%;
-}
-.pane-toolbar {
-  position: absolute;
-  z-index: 2;
-  top: 7px;
-  left: 9px;
-  right: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
-}
-.tty-badge,
-.pane-command-button {
-  pointer-events: auto;
-}
-.tty-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--fg-dim);
-  font: 600 9px var(--font-ui);
-  letter-spacing: 0.1em;
-  opacity: 0.7;
-}
-.tty-badge i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--positive);
-  box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.16);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--positive) 16%, transparent);
-}
-.pane-command-button {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--fg-dim);
-  font: inherit;
-  font-size: 10.5px;
-  padding: 4px 6px;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
-}
-.pane-command-button:hover,
-.pane-command-button:focus-visible {
-  background: var(--bg-alt);
-  border-color: var(--border);
-  color: var(--fg);
-  opacity: 1;
-  outline: none;
-}
-.pane-command-button kbd {
-  font-size: 9px;
-  color: var(--fg-dim);
 }
 .tabview {
   flex: 1;
@@ -959,7 +894,7 @@ kbd {
 .seg button.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 
 /* ===================== Paleta de comandos ===================== */
@@ -1265,7 +1200,7 @@ kbd {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
 }
 
 /* Selects: quitamos el widget nativo (WebKitGTK lo pintaba blanco, ignorando

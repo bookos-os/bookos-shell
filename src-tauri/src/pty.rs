@@ -24,6 +24,8 @@ const FRAME: Duration = Duration::from_millis(16);
 struct Session {
     pair: PtyPair,
     writer: Box<dyn Write + Send>,
+    /// pid de la shell. Como es líder de sesión, también es su grupo de procesos.
+    shell_pid: Option<u32>,
 }
 
 /// Registro global de todas las sesiones PTY abiertas, indexadas por id.
@@ -120,9 +122,12 @@ impl PtyManager {
         let mut cmd = CommandBuilder::new(&shell);
         // Login + interactiva para que se carguen perfiles del usuario.
         cmd.arg("-l");
-        // No heredamos el directorio desde el que se lanzó la aplicación:
-        // una terminal nueva debe comenzar siempre en HOME.
+        // El frontend pasa la carpeta de la terminal desde la que se abrió
+        // esta; sin ella, HOME, nunca la carpeta desde la que se lanzó la app.
+        // Esa carpeta puede haberse borrado entre tanto: sin el filtro la
+        // shell no arrancaría y la pestaña quedaría muerta.
         let start_dir = cwd
+            .filter(|dir| std::path::Path::new(dir).is_dir())
             .or_else(|| std::env::var("HOME").ok())
             .unwrap_or_else(|| "/".to_string());
         cmd.cwd(start_dir);
@@ -135,6 +140,7 @@ impl PtyManager {
             .spawn_command(cmd)
             .map_err(|e| format!("spawn: {e}"))?;
 
+        let shell_pid = child.process_id();
         let writer = pair
             .master
             .take_writer()
@@ -147,7 +153,7 @@ impl PtyManager {
         self.sessions
             .lock()
             .unwrap()
-            .insert(id.clone(), Session { pair, writer });
+            .insert(id.clone(), Session { pair, writer, shell_pid });
 
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
 
@@ -223,6 +229,30 @@ impl PtyManager {
                 pixel_width: 0,
                 pixel_height: 0,
             })
+            .map_err(|e| e.to_string())
+    }
+
+    /// ¿Está la shell esperando una orden? Lo está si el grupo en primer plano
+    /// del terminal es el suyo; con ssh, sudo o vim delante, el grupo es el de
+    /// ese programa y lo que se teclea no es una línea de la shell.
+    pub fn at_prompt(&self, id: &str) -> Result<bool, String> {
+        let sessions = self.sessions.lock().unwrap();
+        let s = sessions.get(id).ok_or("sesión inexistente")?;
+        Ok(matches!(
+            (s.pair.master.process_group_leader(), s.shell_pid),
+            (Some(pgid), Some(pid)) if pgid as u32 == pid
+        ))
+    }
+
+    /// Carpeta actual de la shell, leída del kernel. Sigue cualquier `cd`,
+    /// `pushd` o `z`, no solo los que pasan por el selector; con ssh delante
+    /// sigue siendo la carpeta local, que es la que vale para abrir otra.
+    pub fn cwd(&self, id: &str) -> Result<String, String> {
+        let sessions = self.sessions.lock().unwrap();
+        let s = sessions.get(id).ok_or("sesión inexistente")?;
+        let pid = s.shell_pid.ok_or("shell sin pid")?;
+        std::fs::read_link(format!("/proc/{pid}/cwd"))
+            .map(|p| p.to_string_lossy().into_owned())
             .map_err(|e| e.to_string())
     }
 
