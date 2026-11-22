@@ -6,9 +6,49 @@ import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { createTerminal } from "./term.js";
 import { setLang, applyI18n, t } from "./i18n/index.js";
 import * as Profiles from "./profiles.js";
+import { resolveTerminalTheme, presetColors, PALETTE_PRESETS, COLOR_FIELDS, ANSI_COLORS } from "./terminal-theme.js";
 import * as Widgets from "./widgets.js";
 
+// Trazados de Heroicons 2.1.5 outline (BookOS-HIG/heroicons), salvo `grip`,
+// que es Lucide grip-vertical porque Heroicons no tiene asa de arrastre.
+// Copiados y no cargados: el WebView no puede leer BookOS-HIG en ejecución.
+const ICON_PATHS = {
+  plus: '<path d="M12 4.5v15m7.5-7.5h-15"/>',
+  close: '<path d="M6 18 18 6M6 6l12 12"/>',
+  cog: '<path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>',
+  grip: '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
+  swap: '<path d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/>',
+  columns: '<path d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z"/>',
+  // view-columns girado: Heroicons no trae la división en filas.
+  rows: '<g transform="rotate(90 12 12)"><path d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z"/></g>',
+  grid: '<path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/>',
+  user: '<path d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>',
+  backspace: '<path d="M12 9.75 14.25 12m0 0 2.25 2.25M14.25 12l2.25-2.25M14.25 12 12 14.25m-2.58 4.92-6.374-6.375a1.125 1.125 0 0 1 0-1.59L9.42 4.83c.21-.211.497-.33.795-.33H19.5a2.25 2.25 0 0 1 2.25 2.25v10.5a2.25 2.25 0 0 1-2.25 2.25h-9.284c-.298 0-.585-.119-.795-.33Z"/>',
+  zoomIn: '<path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6"/>',
+  zoomOut: '<path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM13.5 10.5h-6"/>',
+  home: '<path d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>',
+  folder: '<path d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776"/>',
+  disk: '<path d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/>',
+  chip: '<path d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z"/>',
+  list: '<path d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/>',
+};
+
+function icon(name, size = 16) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
+}
+
 const win = getCurrentWindow();
+const titlebar = document.querySelector(".titlebar");
+const titlebarStart = titlebar.querySelector(".tb-start");
+const titlebarTools = titlebar.querySelector(".tb-tools");
+// Reservamos el mismo ancho a ambos lados para que los menús y controles
+// puedan cambiar de tamaño sin desplazar el centro ni tapar el título.
+const titlebarResizeObserver = new ResizeObserver(() => {
+  const sideWidth = Math.max(titlebarStart.getBoundingClientRect().width, titlebarTools.getBoundingClientRect().width);
+  titlebar.style.setProperty("--titlebar-sides", `${2 * sideWidth}px`);
+});
+titlebarResizeObserver.observe(titlebarStart);
+titlebarResizeObserver.observe(titlebarTools);
 // bookos-palette.js se carga como script clásico y Tauri no expone
 // window.__TAURI__ en esta configuración. Le damos el invoke oficial del
 // módulo para que la paleta pueda sincronizarse sin abrir esa superficie global.
@@ -19,7 +59,9 @@ window.bookosPalette?.setInvoker(invoke);
 let lastWindowMaximized = null;
 async function syncWindowShape() {
   try {
-    const maximized = await win.isMaximized();
+    // Pantalla completa no cuenta como maximizada en Tauri y dejaba las
+    // esquinas y el borde de 1 px pegados al filo de la pantalla.
+    const maximized = (await win.isMaximized()) || (await win.isFullscreen());
     if (maximized === lastWindowMaximized) return;
     lastWindowMaximized = maximized;
     document.documentElement.classList.toggle("window-maximized", maximized);
@@ -116,10 +158,10 @@ function applyTheme(theme) {
   // Reaplica el tema a todas las terminales abiertas.
   for (const handle of termsById.values()) handle.applyTheme(theme);
 
-  // Perfil automático asociado a este modo (si existe).
+  // Los perfiles elegidos a mano conservan sus dos paletas al cambiar de modo.
   const prof = Profiles.profileForTheme(theme);
-  if (prof) {
-    for (const handle of termsById.values()) handle.applyProfile(prof);
+  for (const handle of termsById.values()) {
+    if (handle.followThemeProfile) handle.applyProfile(prof);
   }
 }
 
@@ -131,6 +173,7 @@ window.addEventListener("bookos-palette-changed", () => {
   // xterm.js no lee variables CSS por sí solo: repintamos sus roles base cada
   // vez que Settings entrega una paleta o cuando el usuario la desactiva.
   for (const handle of termsById.values()) handle.applyTheme(state.theme);
+  if (!modal.hidden) updateProfilePreview();
 });
 
 // =====================================================================
@@ -138,6 +181,12 @@ window.addEventListener("bookos-palette-changed", () => {
 // =====================================================================
 const panesEl = document.getElementById("panes");
 const tabsEl = document.getElementById("tabs");
+const tabResizeObserver = new ResizeObserver(revealActiveTab);
+
+function revealActiveTab() {
+  if (document.getElementById("tabsbar").hidden) return;
+  tabsEl.querySelector("[aria-selected='true']")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
 
 function createTab(profile = null, cwd = null) {
   createTab._seq = createTab._seq || 0;
@@ -153,16 +202,18 @@ function createTab(profile = null, cwd = null) {
     split: "none",
     focusedIndex: 0,
   };
-  state.tabs.push(tab);
+  const activeIndex = state.tabs.findIndex((item) => item.id === state.activeTab);
+  state.tabs.splice(activeIndex + 1, 0, tab);
 
   // Primer panel.
   addPaneToTab(tab, profile, cwd);
   selectTab(tab.id);
-  renderTabs();
   return tab;
 }
 
 function addPaneToTab(tab, profile = null, cwd = null) {
+  const followThemeProfile = profile === null;
+  profile ??= Profiles.profileForTheme(state.theme);
   const pane = document.createElement("div");
   pane.className = "pane";
   tab.viewEl.appendChild(pane);
@@ -185,9 +236,11 @@ function addPaneToTab(tab, profile = null, cwd = null) {
       // la cinta entera en cada fotograma hacía parpadear las pestañas: los
       // nodos nuevos pierden :hover hasta el siguiente movimiento del ratón.
       tab.nameEl.textContent = title;
+      if (state.activeTab === tab.id) updateWindowCaption();
     },
   });
-  handle.setFontSize(state.fontSize);
+  if (!profile?.fontSize) handle.setFontSize(state.fontSize);
+  handle.followThemeProfile = followThemeProfile;
   handle.paneEl = pane;
   tab.terms.push(handle);
   termsById.set(handle.id, handle);
@@ -274,22 +327,46 @@ function closeTab(id) {
   }
 }
 
+function updateWindowCaption() {
+  const title = activeTab()?.title || "Terminal";
+  const caption = document.getElementById("windowTitle");
+  caption.textContent = title;
+}
+
 function renderTabs() {
   tabsEl.innerHTML = "";
-  // Con una sola pestaña no mostramos la "cinta" de pestañas (como notepad).
-  tabsEl.classList.toggle("single-tab", state.tabs.length <= 1);
+  const multiple = state.tabs.length > 1;
+  document.getElementById("tabsbar").hidden = !multiple;
+  document.querySelector(".titlebar").classList.toggle("has-tabs", multiple);
+  updateWindowCaption();
 
   for (const tab of state.tabs) {
     const el = document.createElement("div");
     el.className = "tab" + (tab.id === state.activeTab ? " active" : "");
+    el.id = `${tab.id}-label`;
+    el.tabIndex = tab.id === state.activeTab ? 0 : -1;
+    el.setAttribute("role", "tab");
+    el.setAttribute("aria-selected", String(tab.id === state.activeTab));
+    tab.viewEl.id = `${tab.id}-view`;
+    tab.viewEl.setAttribute("role", "tabpanel");
+    tab.viewEl.setAttribute("aria-labelledby", el.id);
+    el.setAttribute("aria-controls", tab.viewEl.id);
     el.innerHTML =
       `<span class="tab-name">${escapeHtml(tab.title)}</span>` +
-      `<button class="tab-close" title="Cerrar pestaña"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>`;
+      `<button class="tab-close" title="${escapeHtml(t("action.closeTab"))}" aria-label="${escapeHtml(t("action.closeTab"))}">${icon("close", 14)}</button>`;
     tab.nameEl = el.querySelector(".tab-name");
     el.onclick = () => {
       if (!el.classList.contains("dragging")) selectTab(tab.id);
     };
     el.onpointerdown = (e) => startTabDrag(e, tab, el);
+    el.onkeydown = (e) => {
+      if (e.target !== el || e.ctrlKey || e.altKey || e.metaKey || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+      e.preventDefault();
+      const index = state.tabs.indexOf(tab);
+      const next = e.key === "Home" ? 0 : e.key === "End" ? state.tabs.length - 1 : (index + (e.key === "ArrowRight" ? 1 : -1) + state.tabs.length) % state.tabs.length;
+      selectTab(state.tabs[next].id);
+      tabsEl.querySelector("[aria-selected='true']").focus();
+    };
     el.querySelector(".tab-close").onclick = (e) => {
       e.stopPropagation();
       closeTab(tab.id);
@@ -297,16 +374,17 @@ function renderTabs() {
     tabsEl.appendChild(el);
   }
 
-  // Botón "+" pegado a las pestañas (solo visible con 2+ pestañas; con 1 ya
-  // está el + de la barra de iconos a la derecha).
-  if (state.tabs.length > 1) {
-    const add = document.createElement("button");
-    add.className = "tab-add";
-    add.title = "Nueva pestaña";
-    add.textContent = "+";
-    add.onclick = () => actions["new-tab"]();
-    tabsEl.appendChild(add);
-  }
+  // El hueco libre tras las pestañas sigue moviendo la ventana. Tauri solo
+  // arrastra si el clic cae justo en el elemento marcado (drag.js, atributo
+  // sin valor), así que este relleno no alcanza a las pestañas.
+  const drag = document.createElement("div");
+  drag.className = "tb-drag";
+  drag.setAttribute("data-tauri-drag-region", "");
+  tabsEl.appendChild(drag);
+  tabResizeObserver.disconnect();
+  tabResizeObserver.observe(tabsEl);
+  tabResizeObserver.observe(tabsEl.querySelector("[aria-selected='true']"));
+  revealActiveTab();
 }
 
 const TAB_MOVE_EASING = { duration: 120, easing: "cubic-bezier(.4,0,.2,1)" };
@@ -317,6 +395,9 @@ const TAB_MOVE_EASING = { duration: 120, easing: "cubic-bezier(.4,0,.2,1)" };
 // en cuanto se cruza su mitad; state.tabs y el DOM se reordenan a la vez.
 function startTabDrag(e, tab, el) {
   if (e.button !== 0 || e.target.closest(".tab-close")) return;
+  // Capturamos desde la pulsación: si el puntero sale antes del umbral de
+  // arrastre, también debemos recibir la liberación y retirar los listeners.
+  el.setPointerCapture(e.pointerId);
   const startX = e.clientX;
   const startLeft = el.offsetLeft;
   let dragging = false;
@@ -328,7 +409,6 @@ function startTabDrag(e, tab, el) {
       // Umbral para que un clic con temblor de mano no se convierta en arrastre.
       if (Math.abs(dx) < 4) return;
       dragging = true;
-      el.setPointerCapture(ev.pointerId);
       el.classList.add("dragging");
     }
     const tabEls = [...tabsEl.querySelectorAll(".tab")];
@@ -353,16 +433,22 @@ function startTabDrag(e, tab, el) {
     el.style.transform = `translateX(${shift}px)`;
   };
 
-  const onUp = () => {
+  const onUp = (ev) => {
     el.removeEventListener("pointermove", onMove);
     el.removeEventListener("pointerup", onUp);
     el.removeEventListener("pointercancel", onUp);
+    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    if (ev.type === "pointercancel") {
+      el.classList.remove("dragging");
+      el.style.removeProperty("transform");
+      return;
+    }
     if (!dragging) return;
     // El `click` que sigue al pointerup aún ve la clase y no selecciona; la
     // selección va después para que renderTabs no tire el nodo a mitad de evento.
     setTimeout(() => {
       selectTab(tab.id);
-      const placed = tabsEl.children[state.tabs.indexOf(tab)];
+      const placed = tabsEl.querySelectorAll(".tab")[state.tabs.indexOf(tab)];
       placed.animate([{ transform: `translateX(${shift}px)` }, { transform: "none" }], TAB_MOVE_EASING);
     });
   };
@@ -437,6 +523,7 @@ function syncStatsToggle() {
   button.setAttribute("aria-pressed", String(!state.statsHidden));
   button.setAttribute("data-i18n-title", key);
   button.title = t(key);
+  button.setAttribute("aria-label", t(key));
 }
 
 const actions = {
@@ -453,13 +540,7 @@ const actions = {
       catch (e) { console.error("[bookos-shell] copiar falló:", e); }
     }
   },
-  paste: async () => {
-    let text = "";
-    try { text = await readText(); }
-    catch (e) { console.error("[bookos-shell] pegar falló:", e); return; }
-    const h = focusedHandle();
-    if (h && text) invoke("pty_write", { id: h.id, data: text });
-  },
+  paste: () => focusedHandle()?.paste(readText),
   clear: () => focusedHandle()?.term.clear(),
   "zoom-in": () => zoom(1),
   "zoom-out": () => zoom(-1),
@@ -489,7 +570,7 @@ const actions = {
   },
   "toggle-menus": () => {
     const shown = document.querySelector(".titlebar").classList.toggle("menus-shown");
-    document.getElementById("menusToggle").setAttribute("aria-pressed", String(shown));
+    document.getElementById("menusToggle").setAttribute("aria-expanded", String(shown));
   },
   "manage-profiles": () => openProfileModal(),
   "close-modal": () => closeProfileModal(),
@@ -509,20 +590,20 @@ let paletteMatches = [];
 let paletteIndex = 0;
 
 const paletteItems = [
-  { id: "new-tab", kind: "action", icon: "+", labelKey: "action.newTab", shortcut: "Ctrl T" },
-  { id: "next-pane", kind: "action", icon: "↔", labelKey: "palette.nextPane", shortcut: "Ctrl Alt ←/→" },
-  { id: "split-h", kind: "action", icon: "═", labelKey: "action.splitH", shortcut: "Ctrl Shift D" },
-  { id: "split-v", kind: "action", icon: "║", labelKey: "action.splitV", shortcut: "Ctrl Shift E" },
-  { id: "toggle-stats", kind: "action", icon: "▦", labelKey: "action.toggleStats", shortcut: "" },
-  { id: "manage-profiles", kind: "action", icon: "◐", labelKey: "action.manageProfiles", shortcut: "" },
-  { id: "clear", kind: "action", icon: "⌫", labelKey: "action.clear", shortcut: "Ctrl L" },
-  { id: "zoom-in", kind: "action", icon: "A+", labelKey: "action.zoomIn", shortcut: "Ctrl +" },
-  { id: "zoom-out", kind: "action", icon: "A−", labelKey: "action.zoomOut", shortcut: "Ctrl −" },
-  { id: "pwd", kind: "command", icon: "⌂", labelKey: "palette.pwd", command: "pwd" },
-  { id: "list", kind: "command", icon: "▤", labelKey: "palette.list", command: "ls -la" },
-  { id: "disk", kind: "command", icon: "◒", labelKey: "palette.disk", command: "df -h" },
-  { id: "memory", kind: "command", icon: "▥", labelKey: "palette.memory", command: "free -h" },
-  { id: "processes", kind: "command", icon: "≋", labelKey: "palette.processes", command: "ps -ef | head -20" },
+  { id: "new-tab", kind: "action", icon: "plus", labelKey: "action.newTab", shortcut: "Ctrl T" },
+  { id: "next-pane", kind: "action", icon: "swap", labelKey: "palette.nextPane", shortcut: "Ctrl Alt ←/→" },
+  { id: "split-h", kind: "action", icon: "columns", labelKey: "action.splitH", shortcut: "Ctrl Shift D" },
+  { id: "split-v", kind: "action", icon: "rows", labelKey: "action.splitV", shortcut: "Ctrl Shift E" },
+  { id: "toggle-stats", kind: "action", icon: "grid", labelKey: "action.toggleStats", shortcut: "" },
+  { id: "manage-profiles", kind: "action", icon: "user", labelKey: "action.manageProfiles", shortcut: "" },
+  { id: "clear", kind: "action", icon: "backspace", labelKey: "action.clear", shortcut: "Ctrl L" },
+  { id: "zoom-in", kind: "action", icon: "zoomIn", labelKey: "action.zoomIn", shortcut: "Ctrl +" },
+  { id: "zoom-out", kind: "action", icon: "zoomOut", labelKey: "action.zoomOut", shortcut: "Ctrl −" },
+  { id: "pwd", kind: "command", icon: "home", labelKey: "palette.pwd", command: "pwd" },
+  { id: "list", kind: "command", icon: "folder", labelKey: "palette.list", command: "ls -la" },
+  { id: "disk", kind: "command", icon: "disk", labelKey: "palette.disk", command: "df -h" },
+  { id: "memory", kind: "command", icon: "chip", labelKey: "palette.memory", command: "free -h" },
+  { id: "processes", kind: "command", icon: "list", labelKey: "palette.processes", command: "ps -ef | head -20" },
 ];
 
 function foldText(value) {
@@ -559,7 +640,7 @@ function renderCommandPalette() {
     button.className = `palette-item${index === paletteIndex ? " active" : ""}`;
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", index === paletteIndex ? "true" : "false");
-    button.innerHTML = `<span class="palette-icon">${escapeHtml(item.icon)}</span>
+    button.innerHTML = `<span class="palette-icon">${icon(item.icon)}</span>
       <span class="palette-label"><strong>${escapeHtml(t(item.labelKey))}</strong>
       ${item.command ? `<small>${escapeHtml(item.command)}</small>` : ""}</span>
       ${item.shortcut ? `<kbd>${escapeHtml(item.shortcut)}</kbd>` : ""}`;
@@ -588,7 +669,7 @@ function closeCommandPalette() {
 // Se dibuja en el buffer alternativo de xterm, igual que fzf/nano/htop. Así
 // no hay una tarjeta HTML flotando dentro de la terminal: el selector ocupa
 // temporalmente la pantalla de la propia consola y vuelve al buffer anterior
-// al elegir o cancelar.
+// al terminar el recorrido. El shell recibe solo la ruta final, al salir.
 let directoryPending = null;
 let directoryQuery = "";
 let directoryIndex = 0;
@@ -690,7 +771,7 @@ function directoryMatchesForQuery() {
 
 function renderInlineDirectoryPicker() {
   if (!directoryPending) return;
-  const { handle, entries, cwd, suggestion } = directoryPending;
+  const { handle, cwd, suggestion, loading, error } = directoryPending;
   const matches = directoryMatchesForQuery();
   directoryIndex = Math.min(directoryIndex, Math.max(0, matches.length - 1));
   const width = Math.max(1, handle.term.cols);
@@ -726,15 +807,17 @@ function renderInlineDirectoryPicker() {
       lines.push(line);
     }
   }
+  if (loading) lines.push("", terminalSafeText(t("directory.loading")));
+  if (error) lines.push("", `${esc}31m${terminalSafeText(t("directory.error"))} ${terminalSafeText(error)}${esc}0m`);
   lines.push(
     "",
-    `${esc}2m← ↑ ↓ → ${t("directory.move")}   Enter ${t("directory.enter")}   Esc ${t("directory.cancel")}${esc}0m`,
+    `${esc}2m← ↑ ↓ → ${t("directory.move")}   Enter ${t("directory.enter")}   Esc / Ctrl+C ${t("directory.finish")}${esc}0m`,
   );
   handle.term.write(`${esc}2J${esc}H${lines.join("\r\n")}`);
 }
 
 function openDirectoryPicker(handle, entries, submit, suggestion = null, cwd = "") {
-  directoryPending = { handle, entries, submit, cwd, suggestion };
+  directoryPending = { handle, entries, submit, cwd, initialCwd: cwd, suggestion, loading: false, error: "" };
   directoryQuery = "";
   directoryIndex = 0;
   handle.setInputMode(handleDirectoryInput);
@@ -755,11 +838,39 @@ function closeDirectoryPicker(submit = null) {
   pending.handle.term.focus();
 }
 
-function chooseDirectory(entry) {
+async function chooseDirectory(entry) {
+  const pending = directoryPending;
+  if (!pending || pending.loading) return;
+  pending.loading = true;
+  pending.error = "";
+  renderInlineDirectoryPicker();
+  try {
+    const entries = await invoke("list_directories", { path: entry.path });
+    // Esc puede cerrar el selector mientras responde el sistema de archivos.
+    if (directoryPending !== pending) return;
+    const parent = dirname(entry.path);
+    pending.cwd = entry.path;
+    pending.entries = parent === entry.path ? entries : [{ name: "..", path: parent }, ...entries];
+    pending.suggestion = null;
+    directoryQuery = "";
+    directoryIndex = 0;
+  } catch (error) {
+    if (directoryPending !== pending) return;
+    pending.error = String(error);
+  }
+  pending.loading = false;
+  renderInlineDirectoryPicker();
+}
+
+function finishDirectoryPicker() {
   if (!directoryPending) return;
-  const { handle, submit } = directoryPending;
-  cwdByPty.set(handle.id, entry.path);
-  closeDirectoryPicker(() => submit(`cd ${shellQuote(entry.path)}\r`));
+  const { handle, submit, cwd, initialCwd } = directoryPending;
+  if (cwd === initialCwd) {
+    closeDirectoryPicker();
+    return;
+  }
+  cwdByPty.set(handle.id, cwd);
+  closeDirectoryPicker(() => submit(`cd ${shellQuote(cwd)}\r`));
 }
 
 function moveDirectorySelection(deltaColumn, deltaRow) {
@@ -781,6 +892,11 @@ function moveDirectorySelection(deltaColumn, deltaRow) {
 
 function handleDirectoryInput(data) {
   if (!directoryPending) return;
+  if (data === "\x1b" || data === "\x03") {
+    finishDirectoryPicker();
+    return;
+  }
+  if (directoryPending.loading) return;
   if (data === "\x1b[A") moveDirectorySelection(0, -1);
   else if (data === "\x1b[B") moveDirectorySelection(0, 1);
   else if (data === "\x1b[C") moveDirectorySelection(1, 0);
@@ -788,8 +904,6 @@ function handleDirectoryInput(data) {
   else if (data === "\r") {
     const matches = directoryMatchesForQuery();
     if (matches[directoryIndex]) chooseDirectory(matches[directoryIndex]);
-  } else if (data === "\x1b" || data === "\x03") {
-    closeDirectoryPicker();
   } else if (data === "\x7f" || data === "\b") {
     directoryQuery = directoryQuery.slice(0, -1);
     directoryIndex = 0;
@@ -917,6 +1031,18 @@ palette.addEventListener("click", (e) => {
   if (e.target === palette) closeCommandPalette();
 });
 
+// WebKitGTK marca :focus-visible tras un clic o un atajo y el anillo se
+// quedaba pintado por fuera del botón. Solo se enseña si se navega con Tab
+// o flechas; en captura para que stopImmediatePropagation no lo salte.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key === "Tab" || e.key.startsWith("Arrow")) document.documentElement.classList.add("kbd-nav");
+  },
+  true,
+);
+window.addEventListener("pointerdown", () => document.documentElement.classList.remove("kbd-nav"), true);
+
 window.addEventListener("keydown", (e) => {
   if (!palette.hidden) {
     // La paleta es modal: Ctrl+T/W y el resto de atajos de la terminal no
@@ -976,6 +1102,7 @@ document.addEventListener("click", (e) => {
     if (fn) {
       fn();
       closeAllMenus();
+      if (btn.dataset.action !== "toggle-menus") closeMenusPanel();
     }
   }
   // Botones de ventana.
@@ -991,12 +1118,39 @@ document.addEventListener("click", (e) => {
 //  Menús desplegables
 // =====================================================================
 function closeAllMenus() {
-  document.querySelectorAll(".menu.open").forEach((m) => m.classList.remove("open"));
+  document.querySelectorAll(".menu.open").forEach((menu) => {
+    menu.classList.remove("open");
+    menu.querySelector(".menu-trigger").setAttribute("aria-expanded", "false");
+  });
+}
+function closeMenusPanel() {
+  document.querySelector(".titlebar").classList.remove("menus-shown");
+  document.getElementById("menusToggle").setAttribute("aria-expanded", "false");
+}
+function positionMenu(menu) {
+  const popup = menu.querySelector(".menu-popup");
+  if (matchMedia("(max-width: 740px)").matches) {
+    // El texto ampliado puede hacer que los títulos ocupen más de una fila.
+    const top = document.getElementById("menubar").getBoundingClientRect().bottom + 4;
+    popup.style.top = `${top}px`;
+    popup.style.maxHeight = `${Math.max(48, innerHeight - top - 16)}px`;
+  } else {
+    popup.style.removeProperty("top");
+    popup.style.removeProperty("max-height");
+  }
 }
 function openMenu(menu) {
   closeAllMenus();
   menu.classList.add("open");
+  menu.querySelector(".menu-trigger").setAttribute("aria-expanded", "true");
+  positionMenu(menu);
 }
+window.addEventListener("resize", () => document.querySelectorAll(".menu.open").forEach(positionMenu));
+document.getElementById("menusToggle").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  closeAllMenus();
+  closeMenusPanel();
+});
 
 const menuTriggers = [...document.querySelectorAll(".menu-trigger")];
 function moveBetweenMenus(delta) {
@@ -1009,6 +1163,8 @@ function moveBetweenMenus(delta) {
 }
 
 menuTriggers.forEach((trigger) => {
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
   trigger.addEventListener("click", (e) => {
     e.stopPropagation();
     const menu = trigger.closest(".menu");
@@ -1041,8 +1197,19 @@ menuTriggers.forEach((trigger) => {
     }
   });
 });
+// Esc desde dentro del menú (HIG §11). Un desplegable abierto ya lo consumió
+// con preventDefault: esa pulsación cierra solo el desplegable.
+document.querySelectorAll(".menu-popup").forEach((popup) => {
+  popup.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.defaultPrevented) return;
+    e.preventDefault();
+    closeAllMenus();
+    popup.closest(".menu").querySelector(".menu-trigger").focus();
+  });
+});
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".menu")) closeAllMenus();
+  if (!e.target.closest(".menubar, #menusToggle")) closeMenusPanel();
 });
 
 // =====================================================================
@@ -1191,6 +1358,8 @@ langSel.addEventListener("change", () => {
   setLang(langSel.value);
   refreshCustomSelects();
   renderProfileList();
+  renderProfilesMenu();
+  if (!modal.hidden) renderProfileColors();
   renderWidgets(); // re-traduce títulos de widgets
 });
 
@@ -1275,23 +1444,44 @@ function restoreSession() {
 //  Perfiles (modal)
 // =====================================================================
 const modal = document.getElementById("profileModal");
+const profileForm = document.getElementById("profileForm");
+document.getElementById("profilePreviewControls").innerHTML = [...document.querySelectorAll(".controls button")].map((button) => `<span>${button.querySelector("svg").outerHTML}</span>`).join("");
 let editingId = null;
+let profileMode = "light";
+let draftColors = {};
+let profileReturnFocus = null;
+
+function setProfileListVisible(visible) {
+  modal.querySelector(".profiles-modal").classList.toggle("show-profile-list", visible);
+  document.getElementById("profilesNav").setAttribute("aria-expanded", String(visible));
+}
+document.getElementById("profilesNav").onclick = () => {
+  const visible = document.getElementById("profilesNav").getAttribute("aria-expanded") !== "true";
+  setProfileListVisible(visible);
+};
+
 
 async function openProfileModal() {
+  profileReturnFocus = document.activeElement;
   await populateFontSelect();
-  renderProfileList();
-  resetProfileForm();
+  const profile = Profiles.loadProfiles().find((p) => p.id === focusedHandle()?.profileId);
+  if (profile) loadProfileIntoForm(profile);
+  else resetProfileForm();
   modal.hidden = false;
+  document.getElementById("pName").focus();
 }
 function closeProfileModal() {
+  closeCustomSelects();
   modal.hidden = true;
+  if (profileReturnFocus?.isConnected && profileReturnFocus.getClientRects().length) profileReturnFocus.focus();
+  else focusedHandle()?.term.focus();
 }
 
 async function populateFontSelect() {
   const sel = document.getElementById("pFont");
   if (sel.dataset.loaded) return;
   const fonts = await invoke("list_fonts");
-  sel.innerHTML = fonts.map((f) => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join("");
+  sel.replaceChildren(...[...new Set(["Hack", ...fonts])].map((font) => new Option(font, font)));
   sel.dataset.loaded = "1";
   refreshCustomSelects();
 }
@@ -1300,8 +1490,6 @@ function renderProfileList() {
   const list = document.getElementById("profileList");
   const profiles = Profiles.loadProfiles();
   list.innerHTML = "";
-  // Estado vacío: sin esto la columna izquierda del modal quedaba en blanco
-  // y parecía que faltaba media interfaz.
   if (profiles.length === 0) {
     const empty = document.createElement("p");
     empty.className = "profile-empty";
@@ -1312,13 +1500,22 @@ function renderProfileList() {
   for (const p of profiles) {
     const item = document.createElement("div");
     item.className = "profile-item";
-    const when = p.activateOn === "none" ? "" : ` · ${t("profile.activate" + cap(p.activateOn))}`;
-    item.innerHTML = `<span>${escapeHtml(p.name)}<br><small>${escapeHtml(p.font)} ${p.fontSize}px${when}</small></span><span class="del"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></span>`;
-    item.querySelector("span:first-child").onclick = () => loadProfileIntoForm(p);
-    item.querySelector(".del").onclick = (e) => {
-      e.stopPropagation();
+    item.classList.toggle("selected", p.id === editingId);
+    const when = p.id === Profiles.defaultProfileId() ? ` · ${t("profile.defaultBadge")}` : p.activateOn && p.activateOn !== "none" ? ` · ${t("profile.activate" + cap(p.activateOn))}` : "";
+    const del = escapeHtml(t("profile.delete"));
+    item.innerHTML = `<button type="button" class="profile-open" aria-current="${p.id === editingId}"><span class="profile-swatches" aria-hidden="true"><i></i><i></i></span>${escapeHtml(p.name)}<small>${escapeHtml(p.font)} ${p.fontSize}px${escapeHtml(when)}</small></button><button type="button" class="del" title="${del}" aria-label="${del}">${icon("close")}</button>`;
+    item.querySelectorAll(".profile-swatches i").forEach((swatch, i) => {
+      const theme = i ? "dark" : "light";
+      swatch.style.background = resolveTerminalTheme(theme, p).background;
+    });
+    item.querySelector(".profile-open").onclick = () => loadProfileIntoForm(p);
+    item.querySelector(".del").onclick = () => {
       Profiles.deleteProfile(p.id);
-      renderProfileList();
+      for (const handle of termsById.values()) {
+        if (handle.profileId === p.id) handle.applyProfile(handle.followThemeProfile ? Profiles.profileForTheme(state.theme) : null);
+      }
+      if (editingId === p.id) resetProfileForm();
+      else renderProfileList();
       renderProfilesMenu();
     };
     list.appendChild(item);
@@ -1327,47 +1524,157 @@ function renderProfileList() {
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 function loadProfileIntoForm(p) {
+  setProfileListVisible(false);
   editingId = p.id;
   document.getElementById("pName").value = p.name;
-  document.getElementById("pFont").value = p.font;
+  const fonts = document.getElementById("pFont");
+  if (![...fonts.options].some((option) => option.value === p.font)) fonts.add(new Option(p.font, p.font));
+  fonts.value = p.font;
   document.getElementById("pFontSize").value = p.fontSize;
   document.getElementById("pShell").value = p.shell || "";
-  document.getElementById("pActivateOn").value = p.activateOn;
+  document.getElementById("pActivateOn").value = p.activateOn || "none";
+  document.getElementById("pCursorStyle").value = p.cursorStyle || "block";
+  document.getElementById("pCursorBlink").checked = p.cursorBlink ?? true;
+  document.getElementById("pLineHeight").value = p.lineHeight || 1.15;
+  document.getElementById("pScrollback").value = p.scrollback ?? 10000;
+  document.getElementById("pDefault").checked = Profiles.defaultProfileId() === p.id;
+  document.getElementById("pCustomColors").checked = !!p.colors;
+  draftColors = Object.fromEntries(["light", "dark"].map((theme) => [theme, { ...presetColors("classic", theme), ...p.colors?.[theme] }]));
+  profileMode = state.theme;
+  document.getElementById("profileStatus").textContent = "";
   refreshCustomSelects();
+  renderProfileColors();
+  renderProfileList();
 }
 function resetProfileForm() {
+  setProfileListVisible(false);
   editingId = null;
-  document.getElementById("profileForm").reset();
-  document.getElementById("pFontSize").value = 14;
+  profileForm.reset();
+  document.getElementById("pFont").value = "Hack";
+  draftColors = { light: presetColors("classic", "light"), dark: presetColors("classic", "dark") };
+  profileMode = state.theme;
+  document.getElementById("profileStatus").textContent = "";
   refreshCustomSelects();
+  renderProfileColors();
+  renderProfileList();
 }
 
-document.getElementById("profileForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const profile = {
+function readProfileForm() {
+  return {
     id: editingId || Profiles.newProfileId(),
-    name: document.getElementById("pName").value.trim() || "Perfil",
+    name: document.getElementById("pName").value.trim() || t("profile.untitled"),
     font: document.getElementById("pFont").value,
-    fontSize: parseInt(document.getElementById("pFontSize").value, 10) || 14,
+    fontSize: Number(document.getElementById("pFontSize").value) || 14,
     shell: document.getElementById("pShell").value.trim() || null,
     activateOn: document.getElementById("pActivateOn").value,
+    cursorStyle: document.getElementById("pCursorStyle").value,
+    cursorBlink: document.getElementById("pCursorBlink").checked,
+    lineHeight: Number(document.getElementById("pLineHeight").value) || 1.15,
+    scrollback: Number(document.getElementById("pScrollback").value),
+    ...(document.getElementById("pCustomColors").checked ? { colors: draftColors } : {}),
   };
-  Profiles.upsertProfile(profile);
-  renderProfileList();
-  renderProfilesMenu();
-  resetProfileForm();
+}
+
+function renderProfileColors() {
+  const colors = draftColors[profileMode];
+  document.querySelectorAll("[data-profile-mode]").forEach((button) => {
+    const selected = button.dataset.profileMode === profileMode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  document.getElementById("profilePresets").innerHTML = Object.keys(PALETTE_PRESETS).map((name) => `<button type="button" class="profile-preset" data-preset="${name}">${escapeHtml(t("profile.preset" + cap(name)))}</button>`).join("");
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    const preset = presetColors(button.dataset.preset, profileMode);
+    button.style.setProperty("--preset-bg", preset.background);
+    button.style.setProperty("--preset-fg", preset.foreground);
+    button.onclick = () => {
+      draftColors[profileMode] = preset;
+      renderProfileColors();
+    };
+  });
+  document.getElementById("profileColorFields").innerHTML = COLOR_FIELDS.map(([key, label]) => `<div class="profile-color"><input type="color" id="pColor-${key}" data-color="${key}" value="${colors[key]}" aria-label="${escapeHtml(t(label))}" /><label for="pHex-${key}">${escapeHtml(t(label))}</label><input class="profile-hex" id="pHex-${key}" data-hex="${key}" value="${colors[key]}" pattern="#[0-9a-fA-F]{6}" maxlength="7" aria-label="${escapeHtml(t(label))} HEX" spellcheck="false" /></div>`).join("");
+  document.getElementById("profileAnsiFields").innerHTML = ANSI_COLORS.map((key, index) => `<label><input type="color" data-color="${key}" value="${colors[key]}" aria-label="ANSI ${index}" /><span>${index}</span></label>`).join("");
+  document.getElementById("profileColors").disabled = !document.getElementById("pCustomColors").checked;
+  updatePresetSelection();
+  updateProfilePreview();
+}
+
+function updatePresetSelection() {
+  const keys = [...COLOR_FIELDS.map(([key]) => key), ...ANSI_COLORS];
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    const preset = presetColors(button.dataset.preset, profileMode);
+    button.setAttribute("aria-pressed", String(keys.every((key) => preset[key] === draftColors[profileMode][key])));
+  });
+}
+
+function updateProfilePreview() {
+  const profile = readProfileForm();
+  const colors = resolveTerminalTheme(profileMode, profile, profileMode === state.theme ? getComputedStyle(document.documentElement) : null);
+  const preview = document.getElementById("profilePreview");
+  for (const [name, key] of Object.entries({ bg: "background", fg: "foreground", cursor: "cursor", selection: "selectionBackground", green: "green", blue: "blue", yellow: "yellow" })) {
+    preview.style.setProperty(`--preview-${name}`, colors[key]);
+  }
+  const terminal = document.getElementById("profilePreviewTerminal");
+  terminal.style.fontFamily = `"${profile.font}", monospace`;
+  terminal.style.fontSize = `${Math.min(40, Math.max(8, profile.fontSize))}px`;
+  terminal.style.lineHeight = String(profile.lineHeight);
+  document.getElementById("profilePreviewTitle").textContent = `${profile.name} — ${profile.shell?.split("/").pop() || "shell"}`;
+  const cursor = document.getElementById("profilePreviewCursor");
+  cursor.className = `preview-cursor ${profile.cursorStyle}${profile.cursorBlink ? " blink" : ""}`;
+}
+
+profileForm.addEventListener("input", (e) => {
+  const key = e.target.dataset.color || e.target.dataset.hex;
+  if (key) {
+    if (!/^#[0-9a-f]{6}$/i.test(e.target.value)) return;
+    draftColors[profileMode][key] = e.target.value.toLowerCase();
+    profileForm.querySelectorAll(`[data-color="${key}"], [data-hex="${key}"]`).forEach((input) => { input.value = e.target.value; });
+    updatePresetSelection();
+  }
+  document.getElementById("profileStatus").textContent = "";
+  updateProfilePreview();
+});
+profileForm.addEventListener("change", () => updateProfilePreview());
+document.getElementById("pCustomColors").addEventListener("change", () => renderProfileColors());
+document.querySelectorAll("[data-profile-mode]").forEach((button) => {
+  button.onclick = () => {
+    profileMode = button.dataset.profileMode;
+    renderProfileColors();
+  };
 });
 
-// Inyecta los perfiles como entradas en el menú "Perfiles".
+profileForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const profile = readProfileForm();
+  Profiles.upsertProfile(profile);
+  if (document.getElementById("pDefault").checked) Profiles.setDefaultProfile(profile.id);
+  else if (Profiles.defaultProfileId() === profile.id) Profiles.setDefaultProfile(null);
+  editingId = profile.id;
+  for (const handle of termsById.values()) {
+    if (handle.profileId === profile.id) handle.applyProfile(profile);
+  }
+  if (e.submitter?.id === "pApply") {
+    const handle = focusedHandle();
+    if (handle) {
+      handle.followThemeProfile = false;
+      handle.applyProfile(profile);
+    }
+    closeProfileModal();
+  } else {
+    document.getElementById("profileStatus").textContent = t("profile.saved");
+  }
+  renderProfileList();
+  renderProfilesMenu();
+});
+
 function renderProfilesMenu() {
   const menu = document.getElementById("profilesMenu");
-  // Limpia las entradas dinámicas (todo antes del <hr>).
   [...menu.querySelectorAll("button[data-profile]")].forEach((b) => b.remove());
   const hr = menu.querySelector("hr");
   for (const p of Profiles.loadProfiles()) {
     const b = document.createElement("button");
     b.dataset.profile = p.id;
-    b.innerHTML = `<span>${escapeHtml(p.name)}</span>`;
+    b.textContent = p.name;
     b.onclick = () => {
       createTab(p);
       closeAllMenus();
@@ -1379,6 +1686,27 @@ function renderProfilesMenu() {
 modal.addEventListener("click", (e) => {
   if (e.target === modal) closeProfileModal();
 });
+window.addEventListener("keydown", (e) => {
+  if (modal.hidden) return;
+  if (e.key === "Escape" && e.target.closest(".themed-select.open")) return;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeProfileModal();
+  } else if (e.key === "Tab") {
+    const controls = [...modal.querySelectorAll("button, input, select, summary, [tabindex='0']")].filter((control) => !control.disabled && control.tabIndex >= 0 && control.getClientRects().length);
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  // Los atajos de la terminal no deben cerrar pestañas mientras se escribe un perfil.
+  if (e.ctrlKey || e.key === "Escape" || e.defaultPrevented) e.stopImmediatePropagation();
+}, true);
 
 // =====================================================================
 //  Panel de sistema: WIDGETS
@@ -1407,9 +1735,9 @@ function renderWidgets() {
       <div class="widget-top">
         <span class="widget-title">${escapeHtml(t(def.titleKey))}</span>
         <span class="widget-tools">
-          <button class="widget-tool drag" title="Mover" draggable="true">⠿</button>
-          ${hasOpts ? `<button class="widget-tool cfg" title="${escapeHtml(t("widget.configure"))}">⚙</button>` : ""}
-          <button class="widget-tool del" title="${escapeHtml(t("widget.remove"))}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button class="widget-tool drag" title="${escapeHtml(t("widget.move"))}" aria-label="${escapeHtml(t("widget.move"))}" draggable="true">${icon("grip", 14)}</button>
+          ${hasOpts ? `<button class="widget-tool cfg" title="${escapeHtml(t("widget.configure"))}" aria-label="${escapeHtml(t("widget.configure"))}">${icon("cog", 14)}</button>` : ""}
+          <button class="widget-tool del" title="${escapeHtml(t("widget.remove"))}" aria-label="${escapeHtml(t("widget.remove"))}">${icon("close", 14)}</button>
         </span>
       </div>
       <div class="widget-body">
@@ -1465,7 +1793,7 @@ function updateWidgets() {
     const bar = card.querySelector(".widget-bar > i");
     if (out.percent != null) {
       card.querySelector(".widget-bar").style.display = "";
-      bar.style.width = `${Math.min(100, Math.max(0, out.percent))}%`;
+      bar.style.transform = `scaleX(${Math.min(100, Math.max(0, out.percent)) / 100})`;
       card.classList.toggle("warn", out.color == null && out.percent >= 75 && out.percent < 90);
       card.classList.toggle("crit", out.color === "crit" || (out.color == null && out.percent >= 90));
       card.classList.toggle("ok", out.color === "ok");
@@ -1525,7 +1853,8 @@ function openWidgetPicker() {
   const grid = document.getElementById("pickerGrid");
   grid.innerHTML = "";
   for (const [type, def] of Object.entries(Widgets.CATALOG)) {
-    const el = document.createElement("div");
+    const el = document.createElement("button");
+    el.type = "button";
     el.className = "picker-item";
     el.textContent = t(def.titleKey);
     el.onclick = () => {

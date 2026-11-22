@@ -37,10 +37,15 @@
   <body>
     <!-- ===== Barra de título (arrastrable, estilo BookOS) ===== -->
     <header class="titlebar" data-tauri-drag-region>
-      <button id="menusToggle" class="titlebar-action" data-action="toggle-menus" data-i18n-title="action.showMenus" title="Menú" aria-pressed="false">
+      <div class="tb-start">
+        <button id="statsToggle" class="titlebar-action" data-action="toggle-stats" data-i18n-title="action.hideStats" title="Ocultar panel de sistema" aria-pressed="true">
+          <svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z"/>
+</svg></button>
+      <button id="menusToggle" class="titlebar-action" data-action="toggle-menus" data-i18n-title="action.showMenus" title="Menú" aria-expanded="false" aria-controls="menubar">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5"/></svg>
       </button>
-      <nav class="menubar" data-tauri-drag-region>
+      <nav class="menubar" id="menubar" data-i18n-aria-label="menu.navigation" aria-label="Menú de la aplicación">
         <div class="menu" data-menu="file">
           <button class="menu-trigger" data-i18n="menu.file">Archivo</button>
           <div class="menu-popup" role="menu">
@@ -125,25 +130,35 @@
           </div>
         </div>
       </nav>
-
-      <!-- Pestañas en el centro; el + aparece pegado a ellas. -->
-      <div class="tb-center" id="tabs" data-tauri-drag-region></div>
-
-      <div class="tb-tools">
-        <button id="statsToggle" class="titlebar-action" data-action="toggle-stats" data-i18n-title="action.hideStats" title="Ocultar panel de sistema" aria-pressed="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"/></svg>
-        </button>
       </div>
-
-      <!-- Controles de ventana. -->
+      <div class="window-caption" data-tauri-drag-region>
+        <span id="windowTitle" data-tauri-drag-region>Terminal</span>
+      </div>
+      <div class="tb-tools">
+        <button class="titlebar-action" data-action="open-palette" data-i18n-title="action.searchCommands" title="Buscar acciones (Ctrl+K)" aria-keyshortcuts="Control+k"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+</svg></button>
+        <button class="titlebar-action toolbar-new-tab" data-action="new-tab" data-i18n-title="action.newTab" title="Nueva pestaña"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+</svg></button>
+        <button class="titlebar-action" data-action="manage-profiles" data-i18n-title="action.manageProfiles" title="Gestionar perfiles…"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42"/>
+</svg></button>
       <div class="tb-right">
         <div class="controls">
-          <button data-win="min" data-i18n-title="wm.minimize" title="Minimizar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
-          <button data-win="max" data-i18n-title="wm.maximize" title="Maximizar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.25V18a2.25 2.25 0 0 0 2.25 2.25h13.5A2.25 2.25 0 0 0 21 18V8.25m-18 0V6a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 6v2.25m-18 0h18"/></svg></button>
-          <button id="winClose" data-win="close" data-i18n-title="wm.close" title="Cerrar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button data-win="min" data-i18n-title="wm.minimize" title="Minimizar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
+          <button data-win="max" data-i18n-title="wm.maximize" title="Maximizar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.25V18a2.25 2.25 0 0 0 2.25 2.25h13.5A2.25 2.25 0 0 0 21 18V8.25m-18 0V6a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 6v2.25m-18 0h18"/></svg></button>
+          <button id="winClose" data-win="close" data-i18n-title="wm.close" title="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
         </div>
       </div>
+      </div>
     </header>
+    <div class="tabsbar" id="tabsbar" hidden>
+      <button type="button" class="tab-add" data-action="new-tab" data-i18n-title="action.newTab" title="Nueva pestaña"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+</svg></button>
+      <div class="tb-center" id="tabs" role="tablist" data-i18n-aria-label="tabs.sessions" aria-label="Sesiones de terminal"></div>
+    </div>
 
     <!-- ===== Cuerpo: terminales + panel de sistema ===== -->
     <main class="body">
@@ -155,8 +170,8 @@
           <div class="syspanel-head">
             <h2 data-i18n="sys.title">Sistema</h2>
             <div class="syspanel-actions">
-              <button class="syspanel-btn" data-action="add-widget" data-i18n-title="widget.add" title="Añadir widget">+</button>
-              <button class="syspanel-btn" data-action="toggle-stats" data-i18n-title="widget.hide" title="Ocultar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+              <button class="syspanel-btn" data-action="add-widget" data-i18n-title="widget.add" title="Añadir widget"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5v15m7.5-7.5h-15"/></svg></button>
+              <button class="syspanel-btn" data-action="toggle-stats" data-i18n-title="widget.hide" title="Ocultar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
             </div>
           </div>
           <div class="widgets" id="widgets"></div>
@@ -188,32 +203,29 @@
     <div class="modal-backdrop" id="commandPalette" hidden>
       <section class="command-palette" role="dialog" aria-modal="true" aria-labelledby="paletteTitle">
         <header class="palette-head">
-          <div>
-            <span class="palette-eyebrow">TTY</span>
-            <h2 id="paletteTitle" data-i18n="palette.title">Paleta de comandos</h2>
-          </div>
-          <button class="modal-close" data-action="close-palette" aria-label="Cerrar">×</button>
+          <h2 id="paletteTitle" data-i18n="palette.title">Paleta de comandos</h2>
+          <button class="modal-close" data-action="close-palette" data-i18n-title="wm.close" title="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
         </header>
         <div class="palette-search">
-          <span class="palette-magnifier">⌕</span>
-          <input id="paletteInput" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="palette.placeholder" placeholder="Buscar una acción o comando…" />
+          <svg class="palette-magnifier" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+          <input id="paletteInput" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="palette.placeholder" placeholder="Buscar una acción o comando…" aria-labelledby="paletteTitle" />
           <kbd>Esc</kbd>
         </div>
         <div class="palette-list" id="paletteList" role="listbox"></div>
         <footer class="palette-foot">
           <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="palette.navigate">navegar</span></span>
           <span><kbd>Enter</kbd> <span data-i18n="palette.run">ejecutar</span></span>
-          <span class="palette-case-note"><span class="case-dot"></span><span data-i18n="palette.caseNote">búsqueda sin mayúsculas</span></span>
+          <span class="palette-case-note"><span data-i18n="palette.caseNote">búsqueda sin mayúsculas</span></span>
         </footer>
       </section>
     </div>
 
     <!-- ===== Selector de widgets a añadir ===== -->
     <div class="modal-backdrop" id="widgetPicker" hidden>
-      <div class="modal modal-narrow">
+      <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
         <header class="modal-head">
-          <h3 data-i18n="widget.pickTitle">Añadir widget</h3>
-          <button class="modal-close" data-action="close-picker"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <h3 id="pickTitle" data-i18n="widget.pickTitle">Añadir widget</h3>
+          <button class="modal-close" data-action="close-picker" data-i18n-title="wm.close" title="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
         </header>
         <div class="picker-grid" id="pickerGrid"></div>
       </div>
@@ -221,10 +233,10 @@
 
     <!-- ===== Configuración de un widget ===== -->
     <div class="modal-backdrop" id="widgetConfig" hidden>
-      <div class="modal modal-narrow">
+      <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="configTitle">
         <header class="modal-head">
-          <h3 data-i18n="widget.configTitle">Configurar widget</h3>
-          <button class="modal-close" data-action="close-config"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <h3 id="configTitle" data-i18n="widget.configTitle">Configurar widget</h3>
+          <button class="modal-close" data-action="close-config" data-i18n-title="wm.close" title="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
         </header>
         <div class="modal-body single" id="widgetConfigBody"></div>
       </div>
@@ -232,32 +244,67 @@
 
     <!-- ===== Modal: gestor de perfiles ===== -->
     <div class="modal-backdrop" id="profileModal" hidden>
-      <div class="modal">
+      <div class="modal profiles-modal" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
         <header class="modal-head">
-          <h3 data-i18n="profile.title">Perfiles</h3>
-          <button class="modal-close" data-action="close-modal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
+          <button type="button" id="profilesNav" class="modal-close profile-list-toggle" aria-controls="profileList" aria-expanded="false" data-i18n-title="profile.showList" title="Perfiles guardados"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z"/>
+</svg></button>
+          <div><h3 id="profileTitle" data-i18n="profile.title">Perfiles</h3><p class="profile-subtitle" data-i18n="profile.subtitle">Una terminal a tu gusto, de día y de noche.</p></div>
+          <button class="modal-close" data-action="close-modal" data-i18n-title="wm.close" title="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 18 18 6M6 6l12 12"/></svg></button>
         </header>
-        <div class="modal-body">
-          <div class="profile-list" id="profileList"></div>
+        <div class="profiles-layout">
+          <aside class="profiles-sidebar">
+            <button type="button" class="btn profile-new" data-action="reset-form"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+</svg> <span data-i18n="profile.newProfile">Nuevo perfil</span></button>
+            <div class="profile-list" id="profileList"></div>
+          </aside>
           <form class="profile-form" id="profileForm">
-            <label><span data-i18n="profile.name">Nombre</span>
-              <input type="text" id="pName" required /></label>
-            <label><span data-i18n="profile.font">Tipografía</span>
-              <select id="pFont"></select></label>
-            <label><span data-i18n="profile.fontSize">Tamaño</span>
-              <input type="number" id="pFontSize" min="8" max="40" value="14" /></label>
-            <label><span data-i18n="profile.shell">Shell</span>
-              <input type="text" id="pShell" placeholder="/usr/bin/fish" /></label>
-            <label><span data-i18n="profile.activateOn">Activar al cambiar a</span>
-              <select id="pActivateOn">
-                <option value="none" data-i18n="profile.activateNone">Nunca (manual)</option>
-                <option value="light" data-i18n="profile.activateLight">Modo claro</option>
-                <option value="dark" data-i18n="profile.activateDark">Modo oscuro</option>
-              </select></label>
-            <div class="modal-actions">
-              <button type="submit" class="btn primary" data-i18n="profile.save">Guardar</button>
-              <button type="button" class="btn" data-action="reset-form" data-i18n="profile.newProfile">Nuevo</button>
+            <div class="profile-fields">
+              <label class="profile-name"><span data-i18n="profile.name">Nombre</span><input type="text" id="pName" required maxlength="80" autocomplete="off" data-i18n-placeholder="profile.namePlaceholder" placeholder="Mi terminal" /></label>
+              <div class="profile-section-title" data-i18n="profile.appearance">Apariencia</div>
+              <div class="profile-mode-bar">
+                <div class="seg" role="group" data-i18n-aria-label="profile.editMode" aria-label="Paleta a editar">
+                  <button type="button" data-profile-mode="light" aria-pressed="true"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/>
+</svg> <span data-i18n="settings.themeLight">Claro</span></button>
+                  <button type="button" data-profile-mode="dark" aria-pressed="false"><svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z"/>
+</svg> <span data-i18n="settings.themeDark">Oscuro</span></button>
+                </div>
+                <label class="profile-check"><input type="checkbox" id="pCustomColors" checked /><span data-i18n="profile.customColors">Colores propios</span></label>
+              </div>
+              <fieldset id="profileColors" class="profile-colors">
+                <legend class="sr-only" data-i18n="profile.palette">Colores de la terminal</legend>
+                <div class="profile-presets" id="profilePresets"></div>
+                <div class="profile-color-grid" id="profileColorFields"></div>
+                <details class="profile-ansi"><summary data-i18n="profile.ansi">Paleta ANSI · 16 colores</summary><div id="profileAnsiFields" class="profile-ansi-grid"></div></details>
+              </fieldset>
+              <div class="profile-preview" id="profilePreview" aria-label="Vista previa" data-i18n-aria-label="profile.preview">
+                <div class="preview-titlebar"><span id="profilePreviewTitle">Mi terminal — shell</span><span class="preview-controls" id="profilePreviewControls" aria-hidden="true"></span></div>
+                <div class="preview-terminal" id="profilePreviewTerminal"><div><span class="preview-green">bookos</span><span class="preview-muted"> ~ % </span>ls</div><div class="preview-files"><span class="preview-blue">Documentos/</span> <span class="preview-blue">Proyectos/</span> <span class="preview-yellow">notas.md</span></div><div><span class="preview-green">bookos</span><span class="preview-muted"> ~ % </span><span class="preview-cursor" id="profilePreviewCursor"></span></div><div class="preview-selection" data-i18n="profile.selectionSample">Así se verá el texto seleccionado</div></div>
+              </div>
+              <div class="profile-section-title" data-i18n="profile.textCursor">Texto y cursor</div>
+              <div class="profile-settings-grid">
+                <label><span data-i18n="profile.font">Tipografía</span><select id="pFont"><option value="Hack">Hack</option></select></label>
+                <label><span data-i18n="profile.fontSize">Tamaño</span><input type="number" id="pFontSize" min="8" max="40" value="14" required /></label>
+                <label><span data-i18n="profile.lineHeight">Interlineado</span><input type="number" id="pLineHeight" min="1" max="2" step="0.05" value="1.15" required /></label>
+                <label><span data-i18n="profile.cursorStyle">Forma del cursor</span><select id="pCursorStyle"><option value="block" data-i18n="profile.cursorBlock">Bloque</option><option value="bar" data-i18n="profile.cursorBar">Barra</option><option value="underline" data-i18n="profile.cursorUnderline">Subrayado</option></select></label>
+              </div>
+              <label class="profile-check"><input type="checkbox" id="pCursorBlink" checked /><span data-i18n="profile.cursorBlink">Cursor parpadeante</span></label>
+              <div class="profile-section-title" data-i18n="profile.behavior">Sesión</div>
+              <div class="profile-settings-grid">
+                <label><span data-i18n="profile.shell">Shell</span><input type="text" id="pShell" placeholder="/usr/bin/zsh" /></label>
+                <label><span data-i18n="profile.scrollback">Líneas de historial</span><input type="number" id="pScrollback" min="0" max="100000" step="1000" value="10000" required /></label>
+                <label class="profile-wide"><span data-i18n="profile.activateOn">Activar al cambiar a</span><select id="pActivateOn"><option value="none" data-i18n="profile.activateNone">Nunca (manual)</option><option value="light" data-i18n="profile.activateLight">Modo claro</option><option value="dark" data-i18n="profile.activateDark">Modo oscuro</option></select></label>
+              </div>
+              <label class="profile-check"><input type="checkbox" id="pDefault" /><span data-i18n="profile.default">Usar por defecto en nuevas terminales</span></label>
+              <p class="profile-hint" data-i18n="profile.shellHint">El shell se usa al abrir una terminal nueva. Los cambios de aspecto se aplican al guardar.</p>
             </div>
+            <footer class="profile-footer">
+              <span id="profileStatus" role="status" aria-live="polite"></span>
+              <div class="modal-actions"><button type="submit" class="btn" data-i18n="profile.save">Guardar</button><button type="submit" class="btn primary" id="pApply" data-i18n="profile.saveApply">Guardar y usar</button></div>
+            </footer>
           </form>
         </div>
       </div>

@@ -6,50 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 
-// Paletas de terminal alineadas con BookOS (claro/oscuro).
-const TERM_THEMES = {
-  light: {
-    background: "#ffffff",
-    foreground: "#1c1c1e",
-    cursor: "#007aff",
-    cursorAccent: "#ffffff",
-    selectionBackground: "rgba(0,122,255,0.25)",
-    black: "#000000", red: "#ff3b30", green: "#34c759", yellow: "#ff9500",
-    blue: "#007aff", magenta: "#af52de", cyan: "#5ac8fa", white: "#8e8e93",
-    brightBlack: "#3a3a3c", brightRed: "#ff453a", brightGreen: "#30d158",
-    brightYellow: "#ffcc00", brightBlue: "#0a84ff", brightMagenta: "#bf5af2",
-    brightCyan: "#64d2ff", brightWhite: "#1c1c1e",
-  },
-  dark: {
-    background: "#000000",
-    foreground: "#f2f2f7",
-    cursor: "#0a84ff",
-    cursorAccent: "#000000",
-    selectionBackground: "rgba(10,132,255,0.35)",
-    black: "#1c1c1e", red: "#ff453a", green: "#30d158", yellow: "#ffd60a",
-    blue: "#0a84ff", magenta: "#bf5af2", cyan: "#64d2ff", white: "#aeaeb2",
-    brightBlack: "#48484a", brightRed: "#ff6961", brightGreen: "#32d74b",
-    brightYellow: "#ffd60a", brightBlue: "#409cff", brightMagenta: "#da8fff",
-    brightCyan: "#70d7ff", brightWhite: "#ffffff",
-  },
-};
-
-function resolvedTermTheme(theme) {
-  const fallback = TERM_THEMES[theme] || TERM_THEMES.dark;
-  const styles = getComputedStyle(document.documentElement);
-  const read = (name, value) => styles.getPropertyValue(name).trim() || value;
-  const background = read("--bg-term", fallback.background);
-  const accent = read("--accent", fallback.cursor);
-  return {
-    ...fallback,
-    background,
-    foreground: read("--fg", fallback.foreground),
-    cursor: accent,
-    cursorAccent: background,
-    selectionBackground: read("--selection", fallback.selectionBackground),
-    blue: accent,
-  };
-}
+import { resolveTerminalTheme } from "./terminal-theme.js";
 
 let counter = 0;
 
@@ -62,6 +19,11 @@ export function createTerminal(container, {
   caseInsensitiveCommands = true,
   cwd = null,
 } = {}) {
+  let currentProfile = profile;
+  let currentTheme = theme;
+  const palette = () => resolveTerminalTheme(currentTheme, currentProfile, getComputedStyle(document.documentElement));
+  const initialPalette = palette();
+  container.style.backgroundColor = initialPalette.background;
   const id = `pty-${Date.now()}-${counter++}`;
   // window.open abre dentro del WebView; ambos tipos de enlace deben salir
   // por el abridor del sistema para llegar al navegador predeterminado.
@@ -84,12 +46,14 @@ export function createTerminal(container, {
     linkHandler: enlaces,
     fontFamily: `${profile?.font || "Hack"}, "SF Mono", monospace`,
     fontSize: profile?.fontSize || 14,
-    cursorBlink: true,
+    cursorBlink: profile?.cursorBlink ?? true,
+    cursorStyle: profile?.cursorStyle || "block",
+    lineHeight: profile?.lineHeight || 1.15,
     // Los fondos de las paletas son opacos: con transparencia activada el
     // WebView (WebKitGTK) paga composición alfa en cada frame para nada.
     allowTransparency: false,
-    scrollback: 10000,
-    theme: resolvedTermTheme(theme),
+    scrollback: profile?.scrollback ?? 10000,
+    theme: initialPalette,
   });
 
   // Deja pasar los atajos de la app (Ctrl+T/W/N, divisiones, zoom, copiar/
@@ -189,7 +153,9 @@ export function createTerminal(container, {
   }
 
   function trackInput(data) {
-    for (const char of data) {
+    // Las marcas de pegado entre corchetes (zsh y fish lo activan) empiezan
+    // por ESC; sin quitarlas, cualquier pegado volvía la línea irrastreable.
+    for (const char of data.replace(/\x1b\[20[01]~/g, "")) {
       if (char === "\r" || char === "\n") {
         inputLine = "";
         inputTrackable = true;
@@ -212,8 +178,8 @@ export function createTerminal(container, {
     }
   }
 
-  // Teclas retenidas mientras el backend dice quién está en primer plano;
-  // se reenvían en orden después del Enter.
+  // El portapapeles y la consulta del proceso son asíncronos: las entradas
+  // posteriores esperan para que Enter no adelante una ruta aún sin pegar.
   let held = null;
 
   function submitLine(atPrompt) {
@@ -230,12 +196,12 @@ export function createTerminal(container, {
   }
 
   function onInput(data) {
-    if (inputModeHandler) {
-      inputModeHandler(data);
+    if (held) {
+      held.push(() => onInput(data));
       return;
     }
-    if (held) {
-      held.push(data);
+    if (inputModeHandler) {
+      inputModeHandler(data);
       return;
     }
     if (data === "\r" && inputTrackable && inputLine.trim()) {
@@ -250,7 +216,7 @@ export function createTerminal(container, {
           submitLine(atPrompt);
           const rest = held;
           held = null;
-          rest.forEach(onInput);
+          rest.forEach((resume) => resume());
         });
       return;
     }
@@ -300,12 +266,38 @@ export function createTerminal(container, {
       invoke("pty_kill", { id });
       term.dispose();
     },
+    get profileId() { return currentProfile?.id ?? null; },
+    async paste(readClipboard) {
+      if (held) {
+        held.push(() => this.paste(readClipboard));
+        return;
+      }
+      held = [];
+      let text = "";
+      try { text = await readClipboard(); }
+      catch (error) { console.error("[bookos-shell] pegar falló:", error); }
+      const rest = held;
+      held = null;
+      // xterm añade sus marcas de pegado y onData actualiza la línea antes
+      // de procesar las teclas que llegaron durante la lectura.
+      if (text) term.paste(text);
+      rest.forEach((resume) => resume());
+    },
     applyTheme(t) {
-      term.options.theme = resolvedTermTheme(t);
+      currentTheme = t;
+      const colors = palette();
+      term.options.theme = colors;
+      container.style.backgroundColor = colors.background;
     },
     applyProfile(p) {
-      if (p.font) term.options.fontFamily = `${p.font}, "SF Mono", monospace`;
-      if (p.fontSize) term.options.fontSize = p.fontSize;
+      currentProfile = p;
+      this.applyTheme(currentTheme);
+      term.options.fontFamily = `${p?.font || "Hack"}, "SF Mono", monospace`;
+      term.options.fontSize = p?.fontSize || 14;
+      term.options.cursorStyle = p?.cursorStyle || "block";
+      term.options.cursorBlink = p?.cursorBlink ?? true;
+      term.options.lineHeight = p?.lineHeight || 1.15;
+      term.options.scrollback = p?.scrollback ?? 10000;
       this.refit();
     },
     setCaseInsensitive(enabled) {

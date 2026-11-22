@@ -4,6 +4,7 @@
   "description": "Terminal nativa para BookOS — Tauri + xterm.js + portable-pty",
   "type": "module",
   "scripts": {
+    "test": "node --test tests/*.test.js",
     "dev": "tauri dev",
     "build": "tauri build",
     "dev:vite": "vite",
